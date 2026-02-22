@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import json
 import os
 import pathlib
 import logging
@@ -393,7 +394,7 @@ def process_message_data(message, content, is_group_message, data, message_map, 
 
     # Handle metadata messages
     if content["ZMESSAGETYPE"] == 6:
-        return process_metadata_message(message, content, is_group_message)
+        return process_metadata_message(message, content, is_group_message, data)
 
     # Handle quoted replies
     metadata = content["ZMETADATA"]
@@ -417,21 +418,51 @@ def process_message_data(message, content, is_group_message, data, message_map, 
     return False  # Message is valid
 
 
-def process_metadata_message(message, content, is_group_message):
+def _parse_group_action(ztext, data):
+    if ztext.endswith("@lid") or ztext.endswith("@s.whatsapp.net"):
+        # This is likely a group member change action
+        # Not really sure actually
+        name = None
+        if ztext in data:
+            name = data.get_chat(ztext).name
+        if "@" in ztext:
+            fallback = ztext.split('@')[0]
+        else:
+            fallback = None
+        entity = name or fallback
+
+        return f"{entity} join the group"
+
+    elif ztext.startswith("{") and ztext.endswith("}"):
+        try:
+            metadata = json.loads(ztext)
+        except json.JSONDecodeError:
+            return ztext  # Not a JSON string, return as-is
+        entity = metadata.get('author', 'Someone')
+        if entity is not "Someone":
+            name = None
+            if entity in data:
+                name = data.get_chat(entity).name
+            if "@" in entity:
+                fallback = entity.split('@')[0]
+            else:
+                fallback = None
+            entity = name or fallback
+        return f"{entity} changed the group name to {metadata.get('subject', 'Unknown')}."
+    elif ztext == "admin_add":
+        return f"The administrator has restricted participant additions to admins only."
+    else:
+        return "Unsupported WhatsApp internal message."
+
+
+def process_metadata_message(message, content, is_group_message, data):
     """Process metadata messages (action_type 6)."""
     if is_group_message:
         # Group
         if content["ZTEXT"] is not None:
-            # Changed name
-            try:
-                int(content["ZTEXT"])
-            except ValueError:
-                msg = f"The group name changed to {content['ZTEXT']}"
-                message.data = msg
-                message.meta = True
-                return False  # Valid message
-            else:
-                return True  # Invalid message
+            message.data = _parse_group_action(content["ZTEXT"], data)
+            message.meta = True
+            return False
         else:
             message.data = None
             return False
