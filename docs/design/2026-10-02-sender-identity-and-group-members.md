@@ -187,7 +187,7 @@ of the backup, records counts only, and deletes its scratch files.
 | Step | Must hold on the backup |
 |---|---|
 | 1 | 1,427 received group messages move from an `@lid` id to a phone id in `sender_jid`, and carry the `@lid` id in `sender_lid`. No `sender_jid` is an `@lid` id. 15,570 messages have a `sender_jid`, as before. |
-| 2 | Of the 5,708 messages whose `sender` is digits, at least 4,008 have a `sender_push_name`. The 82 messages with no member row and a push name have a `sender_push_name` and no `sender_jid`. |
+| 2 | Of the 5,708 messages whose `sender` is digits, 4,189 have a `sender_push_name`. The 82 messages with no member row and a push name have a `sender_push_name` and no `sender_jid`. |
 | 3 | The 42 groups hold 1,318 member entries in total, 689 of them `active`. Every `sender_jid` in a group is the `jid` of an entry in that group's `members`. |
 
 **Nothing existing changes.** For each step, every field that existed before
