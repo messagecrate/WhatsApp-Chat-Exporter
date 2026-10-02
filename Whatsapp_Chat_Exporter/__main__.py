@@ -12,6 +12,7 @@ import importlib.metadata
 from Whatsapp_Chat_Exporter import android_crypt, exported_handler, android_handler
 from Whatsapp_Chat_Exporter import ios_handler, ios_media_handler
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, ChatStore, Timing
+from Whatsapp_Chat_Exporter.identity import IdentityResolver
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, CURRENT_TZ_OFFSET, Crypt
 from Whatsapp_Chat_Exporter.utility import readable_to_bytes, safe_name, bytes_to_readable
 from Whatsapp_Chat_Exporter.utility import import_from_json, incremental_merge, check_update
@@ -538,6 +539,7 @@ def process_contacts(args, data: ChatCollection) -> None:
             f"The contact database {contact_db} was not found; "
             "the sender's contact name and push name are left empty."
         )
+        data.set_system("identity_resolver", IdentityResolver())
 
 
 def process_messages(args, data: ChatCollection) -> None:

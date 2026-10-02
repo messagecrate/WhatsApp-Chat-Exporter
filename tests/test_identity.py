@@ -27,6 +27,11 @@ def test_a_mapped_id_from_the_caller_wins():
     assert IdentityResolver().resolve(LID, mapped_jid=PHONE) == Identity(PHONE, LID, None, None)
 
 
+def test_a_mapped_id_from_the_caller_wins_over_the_lid_map():
+    resolver = IdentityResolver(lid_to_phone={LID: "85287654321@s.whatsapp.net"})
+    assert resolver.resolve(LID, mapped_jid=PHONE) == Identity(PHONE, LID, None, None)
+
+
 def test_no_stored_id_resolves_to_nothing():
     assert IdentityResolver().resolve(None) == Identity(None, None, None, None)
     assert IdentityResolver().resolve("") == Identity(None, None, None, None)
@@ -115,4 +120,4 @@ def test_a_merge_keeps_members_when_the_other_chat_has_none():
     old = ChatStore(Device.IOS, "Group")
     old.members = [member_entry(Identity(PHONE, None, None, None), True, False)]
     old.merge_with(ChatStore(Device.IOS, "Group"))
-    assert old.members is not None
+    assert old.members == [member_entry(Identity(PHONE, None, None, None), True, False)]

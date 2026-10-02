@@ -49,6 +49,12 @@ class TestSenderLid:
         assert message.sender_jid == PHONE
         assert message.sender_lid is None
 
+    def test_no_sender_row_gives_no_identity(self):
+        message = new_message()
+        _set_group_sender(message, {"sender_jid_row_id": 0, "group_sender_jid": None}, ChatCollection(), True)
+        assert message.sender_jid is None
+        assert message.sender_lid is None
+
     def test_the_legacy_schema_has_no_lid(self):
         message = new_message()
         _set_group_sender(message, {"remote_resource": PHONE}, ChatCollection(), False)
@@ -111,9 +117,11 @@ class TestMissingContactDatabase:
     def test_a_missing_wa_db_is_logged(self, tmp_path, caplog):
         missing = str(tmp_path / "wa.db")
         args = types.SimpleNamespace(wa=missing, android=True, enrich_from_vcards=None)
+        data = ChatCollection()
         with caplog.at_level(logging.INFO):
-            process_contacts(args, ChatCollection())
+            process_contacts(args, data)
         assert len([r for r in caplog.records if missing in r.getMessage()]) == 1
+        assert isinstance(data.get_system("identity_resolver"), IdentityResolver)
 
 
 GROUP = "85212345678-1463926641@g.us"

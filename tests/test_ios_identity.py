@@ -1,4 +1,5 @@
 import inspect
+import logging
 import sqlite3
 
 from Whatsapp_Chat_Exporter import ios_handler
@@ -49,6 +50,12 @@ class TestLoadLidMap:
 
     def test_no_media_folder_gives_an_empty_map(self):
         assert _load_lid_map(None) == {}
+
+    def test_no_file_is_logged_once(self, tmp_path, caplog):
+        with caplog.at_level(logging.INFO):
+            _load_lid_map(str(tmp_path))
+        assert len(caplog.records) == 1
+        assert "LID.sqlite" in caplog.records[0].getMessage()
 
     def test_a_file_without_the_table_gives_an_empty_map(self, tmp_path):
         sqlite3.connect(tmp_path / "LID.sqlite").close()
