@@ -120,7 +120,7 @@ Measured on the backup.
 |---|---|
 | The sender's stored id | `ZWAGROUPMEMBER.ZMEMBERJID`, through `ZWAMESSAGE.ZGROUPMEMBER`. |
 | The phone id behind an `@lid` id | `LID.sqlite`, table `ZWAZACCOUNT`. It maps all 45 `@lid` senders and all but 2 of the `@lid` members of groups. |
-| Contact name | `ZWAGROUPMEMBER.ZCONTACTNAME`, else `ZWAGROUPMEMBER.ZFIRSTNAME`. |
+| Contact name | `ZWAGROUPMEMBER.ZCONTACTNAME`, else `ZWAGROUPMEMBER.ZFIRSTNAME`, from any member row with the sender's id. The rows are loaded into a dictionary before the message loop. |
 | Push name | `ZWAPROFILEPUSHNAME.ZPUSHNAME`, looked up by the stored id and then by the phone id. |
 | Members | Every `ZWAGROUPMEMBER` row of the chat, with `ZISACTIVE` and `ZISADMIN`. In 153 cases two rows of one group are the same person. |
 
@@ -224,8 +224,18 @@ messages, 17,624 received group messages, 42 groups.
 | Step | Result |
 |---|---|
 | 1 | `sender_jid` is a phone id on 15,570 messages, an `@lid` id on none, and `null` on 2,054. `sender_lid` is set on 1,427. |
-| 2 | Of the 15,570 messages with a `sender_jid`: 681 have a contact name and a push name, 6,787 a push name only, 300 a contact name only, 7,802 neither. Of the 5,708 messages whose `sender` is digits, 2,698 have a push name. No message without a `sender_jid` has a name. |
-| 3 | The 42 groups hold 486 member entries, built from 639 member rows; 153 rows merged into another row's entry. 399 entries are active and 159 are admins. 484 entries have a phone id and 2 an `@lid` id. 173 carry an `@lid` id, 76 a contact name, 233 a push name. Every group has at least one entry. Every `sender_jid` in a group is the `jid` of an entry in that group. |
+| 2 | Of the 15,570 messages with a `sender_jid`: 4,316 have a contact name and a push name, 3,152 a push name only, 3,706 a contact name only, 4,396 neither. Of the 5,708 messages whose `sender` is digits, 2,698 have a push name. No message without a `sender_jid` has a name. |
+| 3 | The 42 groups hold 486 member entries, built from 639 member rows; 153 rows merged into another row's entry. 399 entries are active and 159 are admins. 484 entries have a phone id and 2 an `@lid` id. 173 carry an `@lid` id, 165 a contact name, 233 a push name. Every group has at least one entry. Every `sender_jid` in a group is the `jid` of an entry in that group. |
+
+The contact name counts are from the final code, which takes a person's
+contact name from any member row with their id. A first version read only the
+member row the message points to, and found a contact name on 981 messages.
+Most of the difference comes from the member rows of the `@broadcast` session
+below, which carry address-book names.
+
+One gap is known: on 114 messages the sender has no contact name although
+their entry in `members` has one. The name sits on the person's `@lid` row and
+the message points to their phone-id row.
 
 After every step, each field that existed before the step is identical on all
 128,386 messages, `sender_jid` in step 1 being the stated exception.
