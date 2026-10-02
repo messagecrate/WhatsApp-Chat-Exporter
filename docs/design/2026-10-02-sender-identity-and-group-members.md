@@ -1,6 +1,6 @@
 # Sender identity and group members in the JSON
 
-Date: 2026-10-02. Status: approved design, not yet built.
+Date: 2026-10-02. Status: built.
 
 ## Why
 
@@ -105,8 +105,10 @@ A backup can hold two member rows for one person in one group: one under the
 A sender who has a member row appears in `members` with the same `jid` as on
 their messages, so a reader can match the two by `jid`.
 
-The owner of the phone is not in `members`. The backup has no member row for
-the owner.
+The fork neither adds nor removes the owner of the phone. Where the backup has
+a member row for the owner, the owner is an entry like any other. On the
+measured iPhone backup the owner has a member row in 30 of the 42 groups. A
+reader that knows the owner's number can leave that entry out.
 
 ## Where each fact comes from
 
@@ -117,10 +119,10 @@ Measured on the backup.
 | Fact | Source |
 |---|---|
 | The sender's stored id | `ZWAGROUPMEMBER.ZMEMBERJID`, through `ZWAMESSAGE.ZGROUPMEMBER`. |
-| The phone id behind an `@lid` id | `LID.sqlite`, table `ZWAZACCOUNT`. It maps all 45 `@lid` senders and 465 of the 467 `@lid` member rows. |
-| Contact name | `ZWAGROUPMEMBER.ZCONTACTNAME`, else `ZWAGROUPMEMBER.ZFIRSTNAME`. |
+| The phone id behind an `@lid` id | `LID.sqlite`, table `ZWAZACCOUNT`. It maps all 45 `@lid` senders and all but 2 of the `@lid` members of groups. |
+| Contact name | `ZWAGROUPMEMBER.ZCONTACTNAME`, else `ZWAGROUPMEMBER.ZFIRSTNAME`, from any member row with the sender's id. The rows are loaded into a dictionary before the message loop. |
 | Push name | `ZWAPROFILEPUSHNAME.ZPUSHNAME`, looked up by the stored id and then by the phone id. |
-| Members | Every `ZWAGROUPMEMBER` row of the chat, with `ZISACTIVE` and `ZISADMIN`. In 447 cases two rows of one group are the same person. |
+| Members | Every `ZWAGROUPMEMBER` row of the chat, with `ZISACTIVE` and `ZISADMIN`. In 153 cases two rows of one group are the same person. |
 
 - The tool extracts each database from the backup by its hashed file name.
   `LID.sqlite` is not extracted today and must be added. When the backup has no
@@ -198,7 +200,7 @@ of the backup, records counts only, and deletes its scratch files.
 |---|---|
 | 1 | 1,427 received group messages move from an `@lid` id to a phone id in `sender_jid`, and carry the `@lid` id in `sender_lid`. No `sender_jid` is an `@lid` id. 15,570 messages have a `sender_jid`, as before. |
 | 2 | Of the 15,570 messages with a `sender_jid`, 7,468 have a `sender_push_name` and 981 have a `sender_contact_name`. Of the 5,708 messages whose `sender` is digits, at least 2,696 have a `sender_push_name`. The 2,054 messages with no member row have neither name. |
-| 3 | The 1,318 member rows become one entry per person in each group, with the 447 doubled persons merged; the check script computes the expected entries from the database. Every `sender_jid` in a group is the `jid` of an entry in that group's `members`. |
+| 3 | The 639 member rows of the 42 groups become one entry per person in each group; the check script computes the expected entries from the database. Every `sender_jid` in a group is the `jid` of an entry in that group's `members`. |
 
 **Nothing existing changes.** For each step, every field that existed before
 the step is identical between the old and the new `result.json`, across all
@@ -213,6 +215,34 @@ legacy sender path. It does not check the `jid_map` mapping.
 
 - A table or file that a new field needs is absent: the fields that depend on
   it are `null`, the run continues, and one log line names what was absent.
+
+## Measured results
+
+Measured on the iPhone backup on 2026-10-02, after each step. 128,386
+messages, 17,624 received group messages, 42 groups.
+
+| Step | Result |
+|---|---|
+| 1 | `sender_jid` is a phone id on 15,570 messages, an `@lid` id on none, and `null` on 2,054. `sender_lid` is set on 1,427. |
+| 2 | Of the 15,570 messages with a `sender_jid`: 4,316 have a contact name and a push name, 3,152 a push name only, 3,706 a contact name only, 4,396 neither. Of the 5,708 messages whose `sender` is digits, 2,698 have a push name. No message without a `sender_jid` has a name. |
+| 3 | The 42 groups hold 486 member entries, built from 639 member rows; 153 rows merged into another row's entry. 399 entries are active and 159 are admins. 484 entries have a phone id and 2 an `@lid` id. 173 carry an `@lid` id, 165 a contact name, 233 a push name. Every group has at least one entry. Every `sender_jid` in a group is the `jid` of an entry in that group. |
+
+The contact name counts are from the final code, which takes a person's
+contact name from any member row with their id. A first version read only the
+member row the message points to, and found a contact name on 981 messages.
+Most of the difference comes from the member rows of the `@broadcast` session
+below, which carry address-book names.
+
+One gap is known: on 114 messages the sender has no contact name although
+their entry in `members` has one. The name sits on the person's `@lid` row and
+the message points to their phone-id row.
+
+After every step, each field that existed before the step is identical on all
+128,386 messages, `sender_jid` in step 1 being the stated exception.
+
+The backup holds 1,318 `ZWAGROUPMEMBER` rows in all. 678 of them belong to one
+`@broadcast` session that has no messages and is not exported, and 1 belongs
+to a one-to-one chat, whose `members` is `null`.
 
 ## Not in this design
 

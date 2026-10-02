@@ -1,6 +1,10 @@
 import sqlite3
 
-from Whatsapp_Chat_Exporter.identity import Identity, IdentityResolver, phone_jid, row_value
+from Whatsapp_Chat_Exporter.data_model import ChatStore
+from Whatsapp_Chat_Exporter.identity import (
+    Identity, IdentityResolver, member_entry, merge_members, phone_jid, row_value
+)
+from Whatsapp_Chat_Exporter.utility import Device
 
 PHONE = "85212345678@s.whatsapp.net"
 LID = "123456789012345@lid"
@@ -21,6 +25,11 @@ def test_lid_without_a_mapping_stays_a_lid():
 
 def test_a_mapped_id_from_the_caller_wins():
     assert IdentityResolver().resolve(LID, mapped_jid=PHONE) == Identity(PHONE, LID, None, None)
+
+
+def test_a_mapped_id_from_the_caller_wins_over_the_lid_map():
+    resolver = IdentityResolver(lid_to_phone={LID: "85287654321@s.whatsapp.net"})
+    assert resolver.resolve(LID, mapped_jid=PHONE) == Identity(PHONE, LID, None, None)
 
 
 def test_no_stored_id_resolves_to_nothing():
@@ -62,3 +71,53 @@ def test_row_value_reads_a_dict_and_a_sqlite_row():
     assert row_value(row, "b") is None
     assert row_value({"a": 1}, "a") == 1
     assert row_value({"a": 1}, "b") is None
+
+
+def test_member_entry_has_the_six_fields():
+    entry = member_entry(Identity(PHONE, LID, "Ana Example", "ana"), True, False)
+    assert entry == {
+        "jid": PHONE, "lid": LID, "contact_name": "Ana Example", "push_name": "ana",
+        "active": True, "admin": False,
+    }
+
+
+def test_two_rows_for_one_person_become_one_entry():
+    old_row = member_entry(Identity(PHONE, None, "Ana Example", None), False, True)
+    new_row = member_entry(Identity(PHONE, LID, None, "ana"), True, False)
+    assert merge_members([old_row, new_row]) == [{
+        "jid": PHONE, "lid": LID, "contact_name": "Ana Example", "push_name": "ana",
+        "active": True, "admin": True,
+    }]
+
+
+def test_different_people_stay_separate_and_in_order():
+    ana = member_entry(Identity(PHONE, None, None, None), True, False)
+    ben = member_entry(Identity("85287654321@s.whatsapp.net", None, None, None), True, False)
+    assert merge_members([ana, ben]) == [ana, ben]
+
+
+def test_a_chat_has_no_members_until_they_are_set():
+    assert ChatStore(Device.IOS).members is None
+    assert ChatStore(Device.IOS).to_json()["members"] is None
+
+
+def test_members_are_written_to_json_and_read_back():
+    chat = ChatStore(Device.IOS, "Group")
+    chat.members = [member_entry(Identity(PHONE, None, None, None), True, False)]
+    assert ChatStore.from_json(chat.to_json()).members == chat.members
+
+
+def test_a_merge_takes_the_other_chats_members():
+    old = ChatStore(Device.IOS, "Group")
+    old.members = [member_entry(Identity(PHONE, None, None, None), False, False)]
+    new = ChatStore(Device.IOS, "Group")
+    new.members = [member_entry(Identity(PHONE, None, None, None), True, False)]
+    old.merge_with(new)
+    assert old.members == new.members
+
+
+def test_a_merge_keeps_members_when_the_other_chat_has_none():
+    old = ChatStore(Device.IOS, "Group")
+    old.members = [member_entry(Identity(PHONE, None, None, None), True, False)]
+    old.merge_with(ChatStore(Device.IOS, "Group"))
+    assert old.members == [member_entry(Identity(PHONE, None, None, None), True, False)]
