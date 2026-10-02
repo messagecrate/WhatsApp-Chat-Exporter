@@ -185,9 +185,21 @@ class TestGroupMembers:
              "active": True, "admin": False},
         ]
 
-    def test_no_member_table_leaves_groups_with_an_empty_list(self):
+    def test_no_member_table_leaves_members_null(self):
         data = android_data(False)
         _add_group_members(sqlite3.connect(":memory:"), data)
+        assert data.get_chat(GROUP).members is None
+        assert data.get_chat(PHONE).members is None
+
+    def test_a_failing_member_query_leaves_members_null(self):
+        data = android_data(True)
+        db = android_db([(2, 0)])
+        _add_group_members(db, data)
+        assert data.get_chat(GROUP).members is None
+
+    def test_a_group_without_member_rows_has_an_empty_list(self):
+        data = android_data(False)
+        _add_group_members(android_db([]), data)
         assert data.get_chat(GROUP).members == []
 
     def test_a_one_to_one_chat_has_no_member_list(self):

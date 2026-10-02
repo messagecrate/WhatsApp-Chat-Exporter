@@ -214,7 +214,8 @@ class TestGroupMembers:
         _add_group_members(ios_member_db([(PHONE, None, None, 1, 0)]), data, IdentityResolver())
         assert len(data) == 0
 
-    def test_no_member_table_leaves_groups_with_an_empty_list(self):
+    def test_no_member_table_leaves_members_null(self):
         data = data_with_group_and_person()
         _add_group_members(memory_db(), data, IdentityResolver())
-        assert data.get_chat(GROUP).members == []
+        assert data.get_chat(GROUP).members is None
+        assert data.get_chat(PHONE).members is None

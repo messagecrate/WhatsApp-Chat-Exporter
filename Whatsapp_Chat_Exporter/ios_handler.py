@@ -119,8 +119,8 @@ def _add_group_members(db, data, identity_resolver):
             ORDER BY ZWAGROUPMEMBER.Z_PK
         """).fetchall()
     except sqlite3.Error as e:
-        logging.info(f"Group members could not be read ({e}); member lists are left empty.")
-        rows = []
+        logging.info(f"Group members could not be read ({e}); members is left null.")
+        return
     for chat_jid, member_jid, contact_name, first_name, is_active, is_admin in rows:
         if data.get_chat(chat_jid) is None or not member_jid:
             continue

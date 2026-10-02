@@ -88,7 +88,7 @@ def _table_exists(db, name):
 
 
 def _group_member_rows(db, jid_map_exists):
-    """Rows of (group JID, stored member JID, mapped member JID, is admin)."""
+    """Rows of (group JID, stored member JID, mapped member JID, is admin); None when there is no member table."""
     if _table_exists(db, "group_participant_user"):
         mapped = "COALESCE(phone_jid.raw_string, user_jid.raw_string)" if jid_map_exists else "user_jid.raw_string"
         jid_map_join = """LEFT JOIN jid_map
@@ -115,8 +115,8 @@ def _group_member_rows(db, jid_map_exists):
             WHERE jid IS NOT NULL AND jid != ''
             ORDER BY rowid
         """).fetchall()
-    logging.info("No group member table was found; member lists are left empty.")
-    return []
+    logging.info("No group member table was found; members is left null.")
+    return None
 
 
 def _add_group_members(db, data):
@@ -126,8 +126,10 @@ def _add_group_members(db, data):
     try:
         rows = _group_member_rows(db, data.get_system("jid_map_exists"))
     except sqlite3.Error as e:
-        logging.info(f"Group members could not be read ({e}); member lists are left empty.")
-        rows = []
+        logging.info(f"Group members could not be read ({e}); members is left null.")
+        return
+    if rows is None:
+        return
     for group_jid, stored_jid, mapped_jid, is_admin in rows:
         if data.get_chat(group_jid) is None or not stored_jid:
             continue
