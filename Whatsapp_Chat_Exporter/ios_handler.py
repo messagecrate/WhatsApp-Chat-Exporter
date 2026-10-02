@@ -122,7 +122,7 @@ def _add_group_members(db, data, identity_resolver):
         logging.info(f"Group members could not be read ({e}); member lists are left empty.")
         rows = []
     for chat_jid, member_jid, contact_name, first_name, is_active, is_admin in rows:
-        if data.get_chat(chat_jid) is None:
+        if data.get_chat(chat_jid) is None or not member_jid:
             continue
         identity = identity_resolver.resolve(member_jid, contact_name=contact_name or first_name)
         entries.setdefault(chat_jid, []).append(member_entry(identity, is_active, is_admin))

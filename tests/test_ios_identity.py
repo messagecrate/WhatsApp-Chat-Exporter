@@ -190,6 +190,15 @@ class TestGroupMembers:
              "active": True, "admin": False},
         ]
 
+    def test_a_member_row_with_an_empty_jid_is_skipped(self):
+        db = ios_member_db([("", "X", None, 1, 0), (PHONE, None, None, 1, 0)])
+        data = data_with_group_and_person()
+        _add_group_members(db, data, IdentityResolver())
+        assert data.get_chat(GROUP).members == [
+            {"jid": PHONE, "lid": None, "contact_name": None, "push_name": None,
+             "active": True, "admin": False},
+        ]
+
     def test_a_group_without_member_rows_has_an_empty_list(self):
         data = data_with_group_and_person()
         _add_group_members(ios_member_db([]), data, IdentityResolver())
