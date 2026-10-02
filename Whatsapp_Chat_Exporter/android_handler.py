@@ -20,6 +20,25 @@ from Whatsapp_Chat_Exporter.utility import get_chat_condition, safe_name, bytes_
 
 
 
+def _load_identity_names(db):
+    """Read contact names and push names from wa.db into an IdentityResolver."""
+    contact_names = {}
+    push_names = {}
+    try:
+        rows = db.execute("SELECT jid, display_name, wa_name FROM wa_contacts").fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Contact names could not be read ({e}); sender names are left empty.")
+        rows = []
+    for jid, display_name, wa_name in rows:
+        if not jid:
+            continue
+        if display_name:
+            contact_names[jid] = display_name
+        if wa_name:
+            push_names[jid] = wa_name
+    return IdentityResolver(contact_names=contact_names, push_names=push_names)
+
+
 def contacts(db, data, enrich_from_vcards):
     """
     Process WhatsApp contacts from the database.
@@ -33,6 +52,7 @@ def contacts(db, data, enrich_from_vcards):
         bool: False if no contacts found, True otherwise
     """
     c = db.cursor()
+    data.set_system("identity_resolver", _load_identity_names(db))
     c.execute("SELECT count() FROM wa_contacts")
     total_row_number = c.fetchone()[0]
 
@@ -432,6 +452,8 @@ def _set_group_sender(message, content, data, table_message):
     identity = resolver.resolve(stored_jid, mapped_jid=mapped_jid)
     message.sender_jid = identity.jid
     message.sender_lid = identity.lid
+    message.sender_contact_name = identity.contact_name
+    message.sender_push_name = identity.push_name
 
 
 def _process_metadata_message(message, content, data, table_message):
