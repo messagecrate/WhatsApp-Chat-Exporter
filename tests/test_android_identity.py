@@ -3,7 +3,11 @@ import sqlite3
 import types
 
 from Whatsapp_Chat_Exporter.__main__ import process_contacts
-from Whatsapp_Chat_Exporter.android_handler import _load_identity_names, _set_group_sender, contacts
+from Whatsapp_Chat_Exporter.android_handler import (
+    _add_group_members, _load_identity_names, _set_group_sender, contacts
+)
+from Whatsapp_Chat_Exporter.data_model import ChatStore
+from Whatsapp_Chat_Exporter.utility import Device
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
 
@@ -110,3 +114,83 @@ class TestMissingContactDatabase:
         with caplog.at_level(logging.INFO):
             process_contacts(args, ChatCollection())
         assert len([r for r in caplog.records if missing in r.getMessage()]) == 1
+
+
+GROUP = "85212345678-1463926641@g.us"
+BEN = "85287654321@s.whatsapp.net"
+
+
+def android_db(participants, jid_map=None):
+    """jid rows: 1 group, 2 PHONE, 3 LID, 4 BEN. participants: (user_jid_row_id, rank)."""
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE jid (_id INTEGER PRIMARY KEY, raw_string TEXT)")
+    db.executemany("INSERT INTO jid VALUES (?, ?)", [(1, GROUP), (2, PHONE), (3, LID), (4, BEN)])
+    db.execute("CREATE TABLE group_participant_user (group_jid_row_id INTEGER, user_jid_row_id INTEGER, rank INTEGER)")
+    db.executemany("INSERT INTO group_participant_user VALUES (1, ?, ?)", participants)
+    if jid_map is not None:
+        db.execute("CREATE TABLE jid_map (lid_row_id INTEGER, jid_row_id INTEGER)")
+        db.executemany("INSERT INTO jid_map VALUES (?, ?)", jid_map)
+    return db
+
+
+def legacy_db(participants):
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE group_participants (gjid TEXT, jid TEXT, admin INTEGER)")
+    db.executemany("INSERT INTO group_participants VALUES (?, ?, ?)", participants)
+    return db
+
+
+def android_data(jid_map_exists):
+    data = ChatCollection()
+    data.add_chat(GROUP, ChatStore(Device.ANDROID, "Group"))
+    data.add_chat(PHONE, ChatStore(Device.ANDROID, "Ana"))
+    data.set_system("jid_map_exists", jid_map_exists)
+    return data
+
+
+class TestGroupMembers:
+    def test_a_group_lists_its_members(self):
+        data = android_data(False)
+        data.set_system("identity_resolver", IdentityResolver(
+            contact_names={PHONE: "Ana Example"}, push_names={BEN: "ben"}))
+        _add_group_members(android_db([(2, 2), (4, 0)]), data)
+        assert data.get_chat(GROUP).members == [
+            {"jid": PHONE, "lid": None, "contact_name": "Ana Example", "push_name": None,
+             "active": True, "admin": True},
+            {"jid": BEN, "lid": None, "contact_name": None, "push_name": "ben",
+             "active": True, "admin": False},
+        ]
+
+    def test_a_lid_member_is_mapped_through_jid_map(self):
+        data = android_data(True)
+        _add_group_members(android_db([(3, 0)], jid_map=[(3, 2)]), data)
+        assert data.get_chat(GROUP).members == [
+            {"jid": PHONE, "lid": LID, "contact_name": None, "push_name": None,
+             "active": True, "admin": False},
+        ]
+
+    def test_a_lid_member_without_a_mapping_stays_a_lid(self):
+        data = android_data(True)
+        _add_group_members(android_db([(3, 0)], jid_map=[]), data)
+        assert data.get_chat(GROUP).members[0]["jid"] == LID
+        assert data.get_chat(GROUP).members[0]["lid"] == LID
+
+    def test_the_legacy_table_is_read_and_the_owners_empty_row_is_skipped(self):
+        data = android_data(False)
+        _add_group_members(legacy_db([(GROUP, "", 1), (GROUP, PHONE, 0)]), data)
+        assert data.get_chat(GROUP).members == [
+            {"jid": PHONE, "lid": None, "contact_name": None, "push_name": None,
+             "active": True, "admin": False},
+        ]
+
+    def test_no_member_table_leaves_groups_with_an_empty_list(self):
+        data = android_data(False)
+        _add_group_members(sqlite3.connect(":memory:"), data)
+        assert data.get_chat(GROUP).members == []
+
+    def test_a_one_to_one_chat_has_no_member_list(self):
+        data = android_data(False)
+        _add_group_members(android_db([(2, 0)]), data)
+        assert data.get_chat(PHONE).members is None

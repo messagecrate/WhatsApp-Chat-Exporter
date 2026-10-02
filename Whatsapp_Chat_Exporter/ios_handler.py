@@ -11,7 +11,7 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, phone_jid, row_value
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members, phone_jid, row_value
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -99,6 +99,36 @@ def _build_identity_resolver(db, media_folder):
         lid_to_phone=_load_lid_map(media_folder),
         push_names=_load_push_names(db),
     )
+
+
+def _add_group_members(db, data, identity_resolver):
+    """Set `members` on every group chat: one entry per person with a member row."""
+    entries = {}
+    try:
+        rows = db.execute("""
+            SELECT ZWACHATSESSION.ZCONTACTJID,
+                ZWAGROUPMEMBER.ZMEMBERJID,
+                ZWAGROUPMEMBER.ZCONTACTNAME,
+                ZWAGROUPMEMBER.ZFIRSTNAME,
+                ZWAGROUPMEMBER.ZISACTIVE,
+                ZWAGROUPMEMBER.ZISADMIN
+            FROM ZWAGROUPMEMBER
+                INNER JOIN ZWACHATSESSION
+                    ON ZWAGROUPMEMBER.ZCHATSESSION = ZWACHATSESSION.Z_PK
+            WHERE ZWAGROUPMEMBER.ZMEMBERJID IS NOT NULL
+            ORDER BY ZWAGROUPMEMBER.Z_PK
+        """).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Group members could not be read ({e}); member lists are left empty.")
+        rows = []
+    for chat_jid, member_jid, contact_name, first_name, is_active, is_admin in rows:
+        if data.get_chat(chat_jid) is None:
+            continue
+        identity = identity_resolver.resolve(member_jid, contact_name=contact_name or first_name)
+        entries.setdefault(chat_jid, []).append(member_entry(identity, is_active, is_admin))
+    for chat_jid, chat in data.items():
+        if chat_jid.endswith("@g.us"):
+            chat.members = merge_members(entries.get(chat_jid, []))
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
@@ -270,6 +300,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
+    _add_group_members(db, data, identity_resolver)
 
 
 def process_message_data(message, content, is_group_message, data, message_map, no_reply,

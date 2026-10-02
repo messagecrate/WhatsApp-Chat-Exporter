@@ -2,7 +2,11 @@ import sqlite3
 
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
-from Whatsapp_Chat_Exporter.ios_handler import _load_lid_map, _load_push_names, process_message_data
+from Whatsapp_Chat_Exporter.ios_handler import (
+    _add_group_members, _load_lid_map, _load_push_names, process_message_data
+)
+from Whatsapp_Chat_Exporter.data_model import ChatStore
+from Whatsapp_Chat_Exporter.utility import Device
 
 PHONE = "85212345678@s.whatsapp.net"
 LID = "123456789012345@lid"
@@ -139,3 +143,69 @@ class TestSenderNames:
         read = Message.from_json(message.to_json())
         assert read.sender_contact_name == "Ana Example"
         assert read.sender_push_name == "ana"
+
+
+GROUP = "85212345678-1463926641@g.us"
+
+
+def ios_member_db(members):
+    db = memory_db()
+    db.execute("CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZCONTACTJID VARCHAR)")
+    db.execute("""CREATE TABLE ZWAGROUPMEMBER (Z_PK INTEGER PRIMARY KEY, ZCHATSESSION INTEGER,
+                  ZMEMBERJID VARCHAR, ZCONTACTNAME VARCHAR, ZFIRSTNAME VARCHAR,
+                  ZISACTIVE INTEGER, ZISADMIN INTEGER)""")
+    db.execute("INSERT INTO ZWACHATSESSION VALUES (1, ?)", (GROUP,))
+    db.execute("INSERT INTO ZWACHATSESSION VALUES (2, ?)", (PHONE,))
+    db.executemany(
+        "INSERT INTO ZWAGROUPMEMBER (ZCHATSESSION, ZMEMBERJID, ZCONTACTNAME, ZFIRSTNAME, ZISACTIVE, ZISADMIN)"
+        " VALUES (1, ?, ?, ?, ?, ?)", members)
+    return db
+
+
+def data_with_group_and_person():
+    data = ChatCollection()
+    data.add_chat(GROUP, ChatStore(Device.IOS, "Group"))
+    data.add_chat(PHONE, ChatStore(Device.IOS, "Ana"))
+    return data
+
+
+class TestGroupMembers:
+    def test_a_group_lists_its_member_rows(self):
+        db = ios_member_db([(PHONE, "Ana Example", None, 1, 1), ("85287654321@s.whatsapp.net", None, "Ben", 0, 0)])
+        data = data_with_group_and_person()
+        _add_group_members(db, data, IdentityResolver(push_names={PHONE: "ana"}))
+        assert data.get_chat(GROUP).members == [
+            {"jid": PHONE, "lid": None, "contact_name": "Ana Example", "push_name": "ana",
+             "active": True, "admin": True},
+            {"jid": "85287654321@s.whatsapp.net", "lid": None, "contact_name": "Ben", "push_name": None,
+             "active": False, "admin": False},
+        ]
+
+    def test_a_lid_row_and_a_phone_row_for_one_person_become_one_entry(self):
+        db = ios_member_db([(PHONE, None, None, 0, 0), (LID, None, None, 1, 0)])
+        data = data_with_group_and_person()
+        _add_group_members(db, data, IdentityResolver(lid_to_phone={LID: PHONE}))
+        assert data.get_chat(GROUP).members == [
+            {"jid": PHONE, "lid": LID, "contact_name": None, "push_name": None,
+             "active": True, "admin": False},
+        ]
+
+    def test_a_group_without_member_rows_has_an_empty_list(self):
+        data = data_with_group_and_person()
+        _add_group_members(ios_member_db([]), data, IdentityResolver())
+        assert data.get_chat(GROUP).members == []
+
+    def test_a_one_to_one_chat_has_no_member_list(self):
+        data = data_with_group_and_person()
+        _add_group_members(ios_member_db([(PHONE, None, None, 1, 0)]), data, IdentityResolver())
+        assert data.get_chat(PHONE).members is None
+
+    def test_a_group_that_is_not_exported_is_skipped(self):
+        data = ChatCollection()
+        _add_group_members(ios_member_db([(PHONE, None, None, 1, 0)]), data, IdentityResolver())
+        assert len(data) == 0
+
+    def test_no_member_table_leaves_groups_with_an_empty_list(self):
+        data = data_with_group_and_person()
+        _add_group_members(memory_db(), data, IdentityResolver())
+        assert data.get_chat(GROUP).members == []
