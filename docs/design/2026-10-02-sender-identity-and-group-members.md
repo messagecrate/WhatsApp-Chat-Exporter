@@ -105,8 +105,10 @@ A backup can hold two member rows for one person in one group: one under the
 A sender who has a member row appears in `members` with the same `jid` as on
 their messages, so a reader can match the two by `jid`.
 
-The owner of the phone is not in `members`. The backup has no member row for
-the owner.
+The fork neither adds nor removes the owner of the phone. Where the backup has
+a member row for the owner, the owner is an entry like any other. On the
+measured iPhone backup the owner has a member row in 30 of the 42 groups. A
+reader that knows the owner's number can leave that entry out.
 
 ## Where each fact comes from
 
