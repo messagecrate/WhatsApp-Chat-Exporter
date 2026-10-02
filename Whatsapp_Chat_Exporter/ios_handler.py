@@ -3,12 +3,15 @@
 import os
 import logging
 import shutil
+import sqlite3
+from contextlib import closing
 from glob import glob
 from tqdm import tqdm
 from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, phone_jid
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -61,10 +64,33 @@ def get_contact_name(content):
         return content["ZPUSHNAME"]
 
 
+def _load_lid_map(media_folder):
+    """Map each @lid JID in LID.sqlite to a phone JID. Empty when there is no such file."""
+    path = os.path.join(media_folder, "LID.sqlite") if media_folder else None
+    if path is None or not os.path.isfile(path):
+        logging.info("LID.sqlite was not found; a sender stored under an @lid id keeps that id.")
+        return {}
+    try:
+        with closing(sqlite3.connect(path)) as lid_db:
+            rows = lid_db.execute(
+                "SELECT ZIDENTIFIER, ZPHONENUMBER FROM ZWAZACCOUNT WHERE ZPHONENUMBER IS NOT NULL"
+            ).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"LID.sqlite could not be read ({e}); a sender stored under an @lid id keeps that id.")
+        return {}
+    return {lid: jid for lid, number in rows if (jid := phone_jid(number)) is not None}
+
+
+def _build_identity_resolver(db, media_folder):
+    """Load what the backup knows about people, once per run."""
+    return IdentityResolver(lid_to_phone=_load_lid_map(media_folder))
+
+
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
     """Process WhatsApp messages and contacts from the database."""
     c = db.cursor()
     cursor2 = db.cursor()
+    identity_resolver = _build_identity_resolver(db, media_folder)
 
     # Build the chat filter conditions
     chat_filter_include = get_chat_condition(
@@ -217,7 +243,8 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             )
 
             # Process message data
-            invalid = process_message_data(message, content, is_group_message, data, message_map, no_reply)
+            invalid = process_message_data(
+                message, content, is_group_message, data, message_map, no_reply, identity_resolver)
 
             # Add valid messages to chat
             if not invalid:
@@ -228,7 +255,8 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
 
 
-def process_message_data(message, content, is_group_message, data, message_map, no_reply):
+def process_message_data(message, content, is_group_message, data, message_map, no_reply,
+                         identity_resolver=None):
     """Process and set message data from content row."""
     # Handle group sender info
     if is_group_message and content["ZISFROMME"] == 0:
@@ -243,7 +271,9 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         else:
             fallback = None
         message.sender = name or fallback
-        message.sender_jid = content["ZMEMBERJID"]
+        identity = (identity_resolver or IdentityResolver()).resolve(content["ZMEMBERJID"])
+        message.sender_jid = identity.jid
+        message.sender_lid = identity.lid
     else:
         message.sender = None
 
