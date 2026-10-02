@@ -87,6 +87,7 @@ chat_data_merged = {
         "their_avatar_thumb": None,
         "status": None,
         "media_base": "",
+        "members": None,
         "messages": {
             "24690": {
                 "from_me": True,

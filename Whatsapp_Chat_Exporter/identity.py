@@ -1,6 +1,6 @@
 """Who a WhatsApp id belongs to: phone id, @lid id, contact name, push name."""
 
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional
 
 PHONE_SUFFIX = "@s.whatsapp.net"
 LID_SUFFIX = "@lid"
@@ -73,3 +73,35 @@ class IdentityResolver:
             contact_name or _first_name(self.contact_names, ids),
             _first_name(self.push_names, ids),
         )
+
+
+def member_entry(identity: Identity, active: bool, admin: bool) -> Dict[str, Any]:
+    """One entry of a group chat's `members` list."""
+    return {
+        "jid": identity.jid,
+        "lid": identity.lid,
+        "contact_name": identity.contact_name,
+        "push_name": identity.push_name,
+        "active": bool(active),
+        "admin": bool(admin),
+    }
+
+
+def merge_members(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge the entries of one group that share a jid, keeping first-seen order.
+
+    A backup can hold two member rows for one person: one under the @lid id and
+    one under the phone id. The merged entry keeps every fact either row has,
+    and is active or admin when either row is.
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        current = merged.get(entry["jid"])
+        if current is None:
+            merged[entry["jid"]] = dict(entry)
+            continue
+        for key in ("lid", "contact_name", "push_name"):
+            current[key] = current[key] or entry[key]
+        for key in ("active", "admin"):
+            current[key] = current[key] or entry[key]
+    return list(merged.values())

@@ -208,6 +208,7 @@ class ChatStore:
         self.their_avatar_thumb = None
         self.status = None
         self.media_base = ""
+        self.members = None
 
     def __len__(self) -> int:
         """Get number of chats. Required for dict-like access."""
@@ -283,6 +284,8 @@ class ChatStore:
         self.their_avatar = other.their_avatar or self.their_avatar
         self.their_avatar_thumb = other.their_avatar_thumb or self.their_avatar_thumb
         self.status = other.status or self.status
+        if other.members is not None:
+            self.members = other.members
 
         # Merge messages
         self._messages.update(other._messages)
