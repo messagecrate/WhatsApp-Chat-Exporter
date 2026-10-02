@@ -1,3 +1,23 @@
+> [!IMPORTANT]
+> **This is a fork, kept by [Message Crate](https://github.com/messagecrate/message-crate).**
+> The original is [KnugiHK/WhatsApp-Chat-Exporter](https://github.com/KnugiHK/WhatsApp-Chat-Exporter). If you want to export your WhatsApp chats, use the original: it is the maintained project, and it is what `pip install whatsapp-chat-exporter` installs.
+>
+> **Why the fork exists.** Message Crate imports WhatsApp history from the JSON this tool writes (`--no-html -j`). Message Crate needs to know who sent each message, and the JSON does not say enough:
+>
+> - A group message's `sender` is a contact's name or the digits of an id, never both, and the sender's WhatsApp id is not kept.
+> - An internal `@lid` id is written as bare digits, which read like a phone number.
+> - A group chat has no list of its members.
+>
+> **What the fork changes.** It adds fields to the JSON and nothing else. The HTML output and the command line stay as they are upstream.
+>
+> **The rules of the fork.**
+>
+> 1. Each change is also sent to the original as a pull request. The fork is the original plus those pull requests, and it shrinks each time one is merged.
+> 2. `main` starts from the original's `main` (the code of release 0.13.0) and follows it.
+> 3. Message Crate downloads a release of this fork, pinned by checksum. When the original has everything Message Crate needs, Message Crate goes back to the original and this fork is archived.
+>
+> The fork has no changes to the code yet. This notice is the only difference from the original. The licence is MIT, as in the original; see [LICENSE](LICENSE).
+
 # Whatsapp-Chat-Exporter
 [![Latest in PyPI](https://img.shields.io/pypi/v/whatsapp-chat-exporter?label=Latest%20in%20PyPI)](https://pypi.org/project/whatsapp-chat-exporter/)
 [![License MIT](https://img.shields.io/pypi/l/whatsapp-chat-exporter?color=427B93)](https://github.com/KnugiHK/WhatsApp-Chat-Exporter/blob/main/LICENSE)
