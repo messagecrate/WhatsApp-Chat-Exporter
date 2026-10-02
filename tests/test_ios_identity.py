@@ -1,9 +1,12 @@
+import inspect
 import sqlite3
 
+from Whatsapp_Chat_Exporter import ios_handler
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
 from Whatsapp_Chat_Exporter.ios_handler import (
-    _add_group_members, _load_lid_map, _load_push_names, process_message_data
+    _add_group_members, _build_identity_resolver, _load_lid_map, _load_member_contact_names,
+    _load_push_names, process_message_data
 )
 from Whatsapp_Chat_Exporter.data_model import ChatStore
 from Whatsapp_Chat_Exporter.utility import Device
@@ -104,17 +107,23 @@ class TestLoadPushNames:
 
 
 class TestSenderNames:
-    def test_contact_name_comes_from_the_member_row(self):
+    def test_contact_name_comes_from_the_resolver(self):
+        message = new_message()
+        resolver = IdentityResolver(contact_names={PHONE: "Ana Example"})
+        process_message_data(message, ios_row(ZMEMBERJID=PHONE), True, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name == "Ana Example"
+
+    def test_contact_name_is_found_by_the_mapped_phone_id(self):
+        message = new_message()
+        resolver = IdentityResolver(lid_to_phone={LID: PHONE}, contact_names={PHONE: "Ana Example"})
+        process_message_data(message, ios_row(), True, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name == "Ana Example"
+
+    def test_a_name_in_the_row_is_not_read(self):
         message = new_message()
         row = ios_row(ZMEMBERJID=PHONE, ZCONTACTNAME="Ana Example", ZFIRSTNAME="Ana")
         process_message_data(message, row, True, ChatCollection(), {}, False, IdentityResolver())
-        assert message.sender_contact_name == "Ana Example"
-
-    def test_first_name_is_used_when_there_is_no_contact_name(self):
-        message = new_message()
-        row = ios_row(ZMEMBERJID=PHONE, ZCONTACTNAME=None, ZFIRSTNAME="Ana")
-        process_message_data(message, row, True, ChatCollection(), {}, False, IdentityResolver())
-        assert message.sender_contact_name == "Ana"
+        assert message.sender_contact_name is None
 
     def test_push_name_is_found_by_the_stored_lid(self):
         message = new_message()
@@ -146,6 +155,12 @@ class TestSenderNames:
 
 
 GROUP = "85212345678-1463926641@g.us"
+
+
+def test_the_message_query_reads_no_member_names():
+    source = inspect.getsource(ios_handler.messages)
+    assert "ZCONTACTNAME" not in source
+    assert "ZFIRSTNAME" not in source
 
 
 def ios_member_db(members):
@@ -219,3 +234,29 @@ class TestGroupMembers:
         _add_group_members(memory_db(), data, IdentityResolver())
         assert data.get_chat(GROUP).members is None
         assert data.get_chat(PHONE).members is None
+
+
+class TestLoadMemberContactNames:
+    def test_contact_name_wins_over_first_name(self):
+        db = ios_member_db([(PHONE, "Ana Example", "Ana", 1, 0)])
+        assert _load_member_contact_names(db) == {PHONE: "Ana Example"}
+
+    def test_first_name_is_used_when_there_is_no_contact_name(self):
+        db = ios_member_db([(PHONE, None, "Ana", 1, 0)])
+        assert _load_member_contact_names(db) == {PHONE: "Ana"}
+
+    def test_a_row_without_a_name_is_left_out(self):
+        db = ios_member_db([(PHONE, None, None, 1, 0), (LID, "", "", 1, 0)])
+        assert _load_member_contact_names(db) == {}
+
+    def test_the_first_named_row_for_an_id_wins(self):
+        db = ios_member_db([(PHONE, None, None, 1, 0), (PHONE, "Ana Example", None, 1, 0),
+                            (PHONE, "Ana Other", None, 1, 0)])
+        assert _load_member_contact_names(db) == {PHONE: "Ana Example"}
+
+    def test_no_table_gives_no_names(self):
+        assert _load_member_contact_names(memory_db()) == {}
+
+    def test_the_resolver_gets_the_member_contact_names(self, tmp_path):
+        db = ios_member_db([(PHONE, "Ana Example", None, 1, 0)])
+        assert _build_identity_resolver(db, str(tmp_path)).contact_names == {PHONE: "Ana Example"}

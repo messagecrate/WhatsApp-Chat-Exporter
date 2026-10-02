@@ -11,7 +11,7 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members, phone_jid, row_value
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members, phone_jid
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -93,10 +93,31 @@ def _load_push_names(db):
     return {row[0]: row[1] for row in rows if row[0]}
 
 
+def _load_member_contact_names(db):
+    """Map each member JID in ZWAGROUPMEMBER to its contact name, else its first name.
+
+    Empty when there is no such table. The first named row for a JID wins.
+    """
+    try:
+        rows = db.execute(
+            "SELECT ZMEMBERJID, ZCONTACTNAME, ZFIRSTNAME FROM ZWAGROUPMEMBER ORDER BY Z_PK"
+        ).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Member contact names could not be read ({e}); sender_contact_name is left empty.")
+        return {}
+    names = {}
+    for member_jid, contact_name, first_name in rows:
+        name = contact_name or first_name
+        if member_jid and name and member_jid not in names:
+            names[member_jid] = name
+    return names
+
+
 def _build_identity_resolver(db, media_folder):
     """Load what the backup knows about people, once per run."""
     return IdentityResolver(
         lid_to_phone=_load_lid_map(media_folder),
+        contact_names=_load_member_contact_names(db),
         push_names=_load_push_names(db),
     )
 
@@ -230,8 +251,6 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             ZTEXT,
             ZMESSAGETYPE,
             ZWAGROUPMEMBER.ZMEMBERJID,
-            ZWAGROUPMEMBER.ZCONTACTNAME,
-            ZWAGROUPMEMBER.ZFIRSTNAME,
             ZMETADATA,
             ZSTANZAID,
             ZGROUPINFO,
@@ -319,10 +338,7 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         else:
             fallback = None
         message.sender = name or fallback
-        identity = (identity_resolver or IdentityResolver()).resolve(
-            content["ZMEMBERJID"],
-            contact_name=row_value(content, "ZCONTACTNAME") or row_value(content, "ZFIRSTNAME"),
-        )
+        identity = (identity_resolver or IdentityResolver()).resolve(content["ZMEMBERJID"])
         message.sender_jid = identity.jid
         message.sender_lid = identity.lid
         message.sender_contact_name = identity.contact_name
