@@ -336,6 +336,7 @@ class Message:
         self.meta = False
         self.data = None
         self.sender = None
+        self.sender_jid = None
         self.safe = False
         self.mime = None
         self.message_type = message_type

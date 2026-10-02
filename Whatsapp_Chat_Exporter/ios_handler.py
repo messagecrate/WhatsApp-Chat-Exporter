@@ -243,6 +243,7 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         else:
             fallback = None
         message.sender = name or fallback
+        message.sender_jid = content["ZMEMBERJID"]
     else:
         message.sender = None
 

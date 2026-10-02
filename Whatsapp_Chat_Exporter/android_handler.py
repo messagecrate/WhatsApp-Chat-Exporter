@@ -405,17 +405,19 @@ def _process_binary_message(message, content):
 
 
 def _set_group_sender(message, content, data, table_message):
-    """Set sender name for group messages."""
+    """Set sender name and JID for group messages."""
     name = fallback = None
     if table_message:
         if content["sender_jid_row_id"] > 0:
             _jid = content["group_sender_jid"]
+            message.sender_jid = _jid
             if _jid in data:
                 name = data.get_chat(_jid).name
             if "@" in _jid:
                 fallback = _jid.split('@')[0]
     else:
         if content["remote_resource"] is not None:
+            message.sender_jid = content["remote_resource"]
             if content["remote_resource"] in data:
                 name = data.get_chat(content["remote_resource"]).name
             if "@" in content["remote_resource"]:
