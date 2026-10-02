@@ -1,5 +1,8 @@
+import logging
 import sqlite3
+import types
 
+from Whatsapp_Chat_Exporter.__main__ import process_contacts
 from Whatsapp_Chat_Exporter.android_handler import _load_identity_names, _set_group_sender, contacts
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
@@ -98,3 +101,12 @@ class TestSenderNames:
         data.set_system("identity_resolver", IdentityResolver(push_names={PHONE: "ana"}))
         _set_group_sender(message, {"remote_resource": PHONE}, data, False)
         assert message.sender_push_name == "ana"
+
+
+class TestMissingContactDatabase:
+    def test_a_missing_wa_db_is_logged(self, tmp_path, caplog):
+        missing = str(tmp_path / "wa.db")
+        args = types.SimpleNamespace(wa=missing, android=True, enrich_from_vcards=None)
+        with caplog.at_level(logging.INFO):
+            process_contacts(args, ChatCollection())
+        assert len([r for r in caplog.records if missing in r.getMessage()]) == 1
