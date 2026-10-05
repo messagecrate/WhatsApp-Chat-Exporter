@@ -2,6 +2,8 @@ import inspect
 import logging
 import sqlite3
 
+import pytest
+
 from Whatsapp_Chat_Exporter import ios_handler
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
@@ -269,6 +271,28 @@ class TestLoadMemberContactNames:
         assert _build_identity_resolver(db, str(tmp_path)).contact_names == {PHONE: "Ana Example"}
 
 
+class TestNamesWhenOnePersonHasALidRowAndAPhoneRow:
+
+    def test_a_contact_name_on_the_phone_row_beats_a_first_name_on_the_lid_row(self):
+        db = ios_member_db([(LID, None, "Bob", 1, 0), (PHONE, "Bob Smith", None, 1, 0)])
+        assert _load_member_contact_names(db, {LID: PHONE}) == {PHONE: "Bob Smith"}
+        data = data_with_group_and_person()
+        resolver = IdentityResolver(lid_to_phone={LID: PHONE}, contact_names={PHONE: "Bob Smith"})
+        _add_group_members(db, data, resolver)
+        assert [m["contact_name"] for m in data.get_chat(GROUP).members] == ["Bob Smith"]
+
+    @pytest.mark.parametrize("stored_jid", [PHONE, LID])
+    def test_a_contact_name_only_on_the_lid_row_names_a_message_stored_under_either_id(
+            self, tmp_path, stored_jid):
+        make_lid_db(tmp_path, [(LID, "85212345678")])
+        db = ios_member_db([(LID, "Ana Example", None, 1, 0), (PHONE, None, None, 1, 0)])
+        resolver = _build_identity_resolver(db, str(tmp_path))
+        message = new_message()
+        row = ios_row(ZMEMBERJID=stored_jid)
+        process_message_data(message, row, True, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name == "Ana Example"
+
+
 class TestNamesOnlyOnReceivedGroupMessages:
     def test_a_sent_group_message_has_no_names(self):
         message = new_message()
@@ -283,10 +307,3 @@ class TestNamesOnlyOnReceivedGroupMessages:
         process_message_data(message, ios_row(), False, ChatCollection(), {}, False, resolver)
         assert message.sender_contact_name is None
         assert message.sender_push_name is None
-
-    def test_a_contact_name_on_the_phone_row_beats_a_first_name_on_the_lid_row(self):
-        db = ios_member_db([(LID, None, "Bob", 1, 0), (PHONE, "Bob Smith", None, 1, 0)])
-        assert _load_member_contact_names(db, {LID: PHONE}) == {PHONE: "Bob Smith"}
-        data = data_with_group_and_person()
-        _add_group_members(db, data, IdentityResolver(lid_to_phone={LID: PHONE}, contact_names={PHONE: "Bob Smith"}))
-        assert [m["contact_name"] for m in data.get_chat(GROUP).members] == ["Bob Smith"]
