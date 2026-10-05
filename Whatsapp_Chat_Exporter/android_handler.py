@@ -11,7 +11,7 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, row_value
+from Whatsapp_Chat_Exporter.identity import IdentityResolver
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -432,13 +432,12 @@ def _set_group_sender(message, content, data, table_message):
     stored_jid = mapped_jid = None
     if table_message:
         if content["sender_jid_row_id"] > 0:
-            _jid = content["group_sender_jid"]
-            mapped_jid = _jid
-            stored_jid = row_value(content, "group_sender_raw_jid") or _jid
-            if _jid in data:
-                name = data.get_chat(_jid).name
-            if "@" in _jid:
-                fallback = _jid.split('@')[0]
+            mapped_jid = content["group_sender_jid"]
+            stored_jid = content["group_sender_raw_jid"]
+            if mapped_jid in data:
+                name = data.get_chat(mapped_jid).name
+            if "@" in mapped_jid:
+                fallback = mapped_jid.split('@')[0]
     else:
         if content["remote_resource"] is not None:
             stored_jid = content["remote_resource"]
