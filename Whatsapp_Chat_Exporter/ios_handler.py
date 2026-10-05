@@ -12,7 +12,7 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, phone_jid
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, phone_jid, row_value
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -83,9 +83,40 @@ def _load_lid_map(media_folder):
     return {lid: jid for lid, number in rows if (jid := phone_jid(number)) is not None}
 
 
+def _load_push_names(db):
+    """Map each JID in ZWAPROFILEPUSHNAME to its push name. Empty when there is no such table."""
+    try:
+        rows = db.execute(
+            "SELECT ZJID, ZPUSHNAME FROM ZWAPROFILEPUSHNAME WHERE ZPUSHNAME IS NOT NULL"
+        ).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Push names could not be read ({e}); sender_push_name is left empty.")
+        return {}
+    return {row[0]: row[1] for row in rows if row[0]}
+
+
+def _member_name_columns(db):
+    """Select the two name columns of ZWAGROUPMEMBER, or NULL for one the backup lacks."""
+    present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
+    terms = []
+    for column in ("ZCONTACTNAME", "ZFIRSTNAME"):
+        if column in present:
+            terms.append(f"ZWAGROUPMEMBER.{column},")
+        else:
+            logging.info(
+                f"ZWAGROUPMEMBER has no {column} column; "
+                "sender_contact_name falls back to the other column, or is left empty."
+            )
+            terms.append(f"NULL AS {column},")
+    return "\n            ".join(terms)
+
+
 def _build_identity_resolver(db, media_folder):
     """Load what the backup knows about people, once per run."""
-    return IdentityResolver(lid_to_phone=_load_lid_map(media_folder))
+    return IdentityResolver(
+        lid_to_phone=_load_lid_map(media_folder),
+        push_names=_load_push_names(db),
+    )
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
@@ -179,6 +210,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     logging.info(f"Processing messages...(0/{total_row_number})", extra={"clear": True})
 
     # Fetch messages
+    member_name_columns = _member_name_columns(db)
     messages_query = f"""
         SELECT ZCONTACTJID,
             ZWAMESSAGE.Z_PK,
@@ -187,6 +219,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             ZTEXT,
             ZMESSAGETYPE,
             ZWAGROUPMEMBER.ZMEMBERJID,
+            {member_name_columns}
             ZMETADATA,
             ZSTANZAID,
             ZGROUPINFO,
@@ -273,9 +306,14 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         else:
             fallback = None
         message.sender = name or fallback
-        identity = (identity_resolver or IdentityResolver()).resolve(content["ZMEMBERJID"])
+        identity = (identity_resolver or IdentityResolver()).resolve(
+            content["ZMEMBERJID"],
+            contact_name=row_value(content, "ZCONTACTNAME") or row_value(content, "ZFIRSTNAME"),
+        )
         message.sender_jid = identity.jid
         message.sender_lid = identity.lid
+        message.sender_contact_name = identity.contact_name
+        message.sender_push_name = identity.push_name
     else:
         message.sender = None
 

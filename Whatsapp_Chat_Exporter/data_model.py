@@ -338,6 +338,8 @@ class Message:
         self.sender = None
         self.sender_jid = None
         self.sender_lid = None
+        self.sender_contact_name = None
+        self.sender_push_name = None
         self.safe = False
         self.mime = None
         self.message_type = message_type

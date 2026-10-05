@@ -533,6 +533,11 @@ def process_contacts(args, data: ChatCollection) -> None:
                 android_handler.contacts(db, data, args.enrich_from_vcards)
             else:
                 ios_handler.contacts(db, data)
+    elif args.android:
+        logging.info(
+            f"The contact database {contact_db} was not found; "
+            "the sender's contact name and push name are left empty."
+        )
 
 
 def process_messages(args, data: ChatCollection) -> None:
