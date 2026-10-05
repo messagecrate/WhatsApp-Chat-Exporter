@@ -434,9 +434,9 @@ def _process_single_message(data, content, table_message, timezone_offset):
         timezone_offset=timezone_offset,
         message_type=content["media_wa_type"],
         received_timestamp=content["received_timestamp"],
-        read_timestamp=content["read_timestamp"]
+        read_timestamp=content["read_timestamp"],
+        full_key_id=content["key_id"]
     )
-    message.full_key_id = content["key_id"]
 
     # Handle binary data
     if isinstance(content["data"], bytes):
@@ -1121,9 +1121,9 @@ def _process_call_record(content, chat, data, timezone_offset):
         key_id=content["call_id"],
         timezone_offset=timezone_offset,
         received_timestamp=None,  # TODO: Add timestamp
-        read_timestamp=None  # TODO: Add timestamp
+        read_timestamp=None,  # TODO: Add timestamp
+        full_key_id=content["call_id"]
     )
-    call.full_key_id = call.key_id
 
     # Get caller/callee name
     _jid = content["key_remote_jid"]

@@ -333,7 +333,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             else:
                 current_chat = data.get_chat(contact_id)
 
-            message = new_message(content, timezone_offset)
+            message = message_from_row(content, timezone_offset)
 
             # Process message data
             invalid = process_message_data(
@@ -349,9 +349,9 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     _add_group_members(db, data, identity_resolver, filter_chat)
 
 
-def new_message(content, timezone_offset):
+def message_from_row(content, timezone_offset):
     """A Message for a ZWAMESSAGE row. key_id is the first 17 characters of the stanza id,
-    as upstream writes it; full_key_id is the whole stanza id."""
+    as upstream writes it. full_key_id is the whole stanza id."""
     ts = APPLE_TIME + content["ZMESSAGEDATE"]
     message = Message(
         from_me=content["ZISFROMME"],
@@ -361,9 +361,9 @@ def new_message(content, timezone_offset):
         timezone_offset=timezone_offset,
         message_type=content["ZMESSAGETYPE"],
         received_timestamp=APPLE_TIME + content["ZSENTDATE"] if content["ZSENTDATE"] else None,
-        read_timestamp=None  # TODO: Add timestamp
+        read_timestamp=None,  # TODO: Add timestamp
+        full_key_id=content["ZSTANZAID"]
     )
-    message.full_key_id = content["ZSTANZAID"]
     return message
 
 
@@ -727,9 +727,9 @@ def process_call_record(content, chat, data, timezone_offset):
         timestamp=ts,
         time=ts,
         key_id=content["ZCALLIDSTRING"],
-        timezone_offset=timezone_offset
+        timezone_offset=timezone_offset,
+        full_key_id=content["ZCALLIDSTRING"]
     )
-    call.full_key_id = call.key_id
 
     # Set sender info
     _jid = content["ZGROUPCALLCREATORUSERJIDSTRING"]
