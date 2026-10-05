@@ -11,7 +11,7 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, assign_members, member_entry
+from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -127,7 +127,7 @@ def _group_member_rows(db, jid_map_exists):
     return None
 
 
-def _add_group_members(db, data, filter_chat=(None, None)):
+def _add_group_members(db, data, filter_chat=NO_FILTER):
     """Set `members` on every exported group chat: one entry per member the database lists."""
     resolver = data.get_system("identity_resolver") or IdentityResolver()
     entries = {}

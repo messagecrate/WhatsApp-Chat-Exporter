@@ -246,23 +246,23 @@ class TestGroupMembers:
 class TestLoadMemberContactNames:
     def test_contact_name_wins_over_first_name(self):
         db = ios_member_db([(PHONE, "Ana Example", "Ana", 1, 0)])
-        assert _load_member_contact_names(db) == {PHONE: "Ana Example"}
+        assert _load_member_contact_names(db, {}) == {PHONE: "Ana Example"}
 
     def test_first_name_is_used_when_there_is_no_contact_name(self):
         db = ios_member_db([(PHONE, None, "Ana", 1, 0)])
-        assert _load_member_contact_names(db) == {PHONE: "Ana"}
+        assert _load_member_contact_names(db, {}) == {PHONE: "Ana"}
 
     def test_a_row_without_a_name_is_left_out(self):
         db = ios_member_db([(PHONE, None, None, 1, 0), (LID, "", "", 1, 0)])
-        assert _load_member_contact_names(db) == {}
+        assert _load_member_contact_names(db, {}) == {}
 
     def test_the_first_named_row_for_an_id_wins(self):
         db = ios_member_db([(PHONE, None, None, 1, 0), (PHONE, "Ana Example", None, 1, 0),
                             (PHONE, "Ana Other", None, 1, 0)])
-        assert _load_member_contact_names(db) == {PHONE: "Ana Example"}
+        assert _load_member_contact_names(db, {}) == {PHONE: "Ana Example"}
 
     def test_no_table_gives_no_names(self):
-        assert _load_member_contact_names(memory_db()) == {}
+        assert _load_member_contact_names(memory_db(), {}) == {}
 
     def test_the_resolver_gets_the_member_contact_names(self, tmp_path):
         db = ios_member_db([(PHONE, "Ana Example", None, 1, 0)])
@@ -283,3 +283,10 @@ class TestNamesOnlyOnReceivedGroupMessages:
         process_message_data(message, ios_row(), False, ChatCollection(), {}, False, resolver)
         assert message.sender_contact_name is None
         assert message.sender_push_name is None
+
+    def test_a_contact_name_on_the_phone_row_beats_a_first_name_on_the_lid_row(self):
+        db = ios_member_db([(LID, None, "Bob", 1, 0), (PHONE, "Bob Smith", None, 1, 0)])
+        assert _load_member_contact_names(db, {LID: PHONE}) == {PHONE: "Bob Smith"}
+        data = data_with_group_and_person()
+        _add_group_members(db, data, IdentityResolver(lid_to_phone={LID: PHONE}, contact_names={PHONE: "Bob Smith"}))
+        assert [m["contact_name"] for m in data.get_chat(GROUP).members] == ["Bob Smith"]

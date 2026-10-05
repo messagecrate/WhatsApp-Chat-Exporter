@@ -12,7 +12,7 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, assign_members, member_entry, phone_jid
+from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry, phone_jid
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -95,25 +95,39 @@ def _load_push_names(db):
     return {row[0]: row[1] for row in rows if row[0]}
 
 
-def _member_column(present, column):
-    """`ZWAGROUPMEMBER.<column>` as a SELECT term, or NULL when the backup lacks the column."""
-    if column in present:
-        return f"ZWAGROUPMEMBER.{column}"
-    logging.info(f"ZWAGROUPMEMBER has no {column} column; what it holds is left empty.")
-    return f"NULL AS {column}"
+_MEMBER_COLUMN_FIELDS = {
+    "ZCONTACTNAME": "sender_contact_name and the members' contact_name fall back to ZFIRSTNAME, or are left empty",
+    "ZFIRSTNAME": "sender_contact_name and the members' contact_name come from ZCONTACTNAME alone",
+    "ZISACTIVE": "the members' active is left null",
+    "ZISADMIN": "the members' admin is left null",
+}
 
 
-def _member_columns(db, *columns):
-    """The named ZWAGROUPMEMBER columns as SELECT terms, NULL for each one the backup lacks."""
+def _member_columns(db, *columns, quiet=()):
+    """Select the named ZWAGROUPMEMBER columns, or NULL for one the backup lacks.
+
+    One log line per missing column; `quiet` names columns whose absence an
+    earlier query of the same run already logged.
+    """
     present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
-    return ", ".join(_member_column(present, column) for column in columns)
+    terms = []
+    for column in columns:
+        if column in present:
+            terms.append(f"ZWAGROUPMEMBER.{column}")
+            continue
+        if column not in quiet:
+            logging.info(f"ZWAGROUPMEMBER has no {column} column; {_MEMBER_COLUMN_FIELDS[column]}.")
+        terms.append(f"NULL AS {column}")
+    return ", ".join(terms)
 
 
-def _load_member_contact_names(db):
-    """Map each member JID in ZWAGROUPMEMBER to its contact name, else its first name.
+def _load_member_contact_names(db, lid_to_phone):
+    """Map each member to its contact name, else its first name, keyed by the phone id.
 
-    Empty when there is no such table. A contact name from any of a person's rows
-    wins over a first name; among rows of one kind, the first wins.
+    Empty when there is no such table. A person's rows under an @lid id and under
+    the phone id are one person, so the names are keyed by the phone id where
+    `lid_to_phone` knows it. A contact name from any row wins over a first name;
+    among rows of one kind, the first wins.
     """
     try:
         rows = db.execute(
@@ -128,30 +142,32 @@ def _load_member_contact_names(db):
     for member_jid, contact_name, first_name in rows:
         if not member_jid:
             continue
-        if contact_name and member_jid not in contact_names:
-            contact_names[member_jid] = contact_name
-        if first_name and member_jid not in first_names:
-            first_names[member_jid] = first_name
+        person = lid_to_phone.get(member_jid, member_jid)
+        if contact_name and person not in contact_names:
+            contact_names[person] = contact_name
+        if first_name and person not in first_names:
+            first_names[person] = first_name
     return {jid: contact_names.get(jid) or first_names[jid] for jid in contact_names.keys() | first_names.keys()}
 
 
 def _build_identity_resolver(db, media_folder):
     """Load what the backup knows about people, once per run."""
+    lid_to_phone = _load_lid_map(media_folder)
     return IdentityResolver(
-        lid_to_phone=_load_lid_map(media_folder),
-        contact_names=_load_member_contact_names(db),
+        lid_to_phone=lid_to_phone,
+        contact_names=_load_member_contact_names(db, lid_to_phone),
         push_names=_load_push_names(db),
     )
 
 
-def _add_group_members(db, data, identity_resolver, filter_chat=(None, None)):
+def _add_group_members(db, data, identity_resolver, filter_chat=NO_FILTER):
     """Set `members` on every exported group chat: one entry per person with a member row."""
     entries = {}
     try:
         rows = db.execute(f"""
             SELECT ZWACHATSESSION.ZCONTACTJID,
                 ZWAGROUPMEMBER.ZMEMBERJID,
-                {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME', 'ZISACTIVE', 'ZISADMIN')}
+                {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME', 'ZISACTIVE', 'ZISADMIN', quiet=('ZCONTACTNAME', 'ZFIRSTNAME'))}
             FROM ZWAGROUPMEMBER
                 INNER JOIN ZWACHATSESSION
                     ON ZWAGROUPMEMBER.ZCHATSESSION = ZWACHATSESSION.Z_PK

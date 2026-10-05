@@ -85,7 +85,7 @@ table.
 
 | Field | Holds |
 |---|---|
-| `members` | On a group, a list with one entry per person who has a member row in the backup. On any other chat, `null`. |
+| `members` | On a group, a list with one entry per person who has a member row in the backup. On any other chat, `null`, and `null` on a group the chat filter (`--include`, `--exclude`) left out of the export. |
 
 ### Each entry of `members`
 

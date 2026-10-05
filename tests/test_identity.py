@@ -1,4 +1,3 @@
-import sqlite3
 
 from Whatsapp_Chat_Exporter.data_model import ChatStore
 from Whatsapp_Chat_Exporter.identity import (
@@ -118,7 +117,6 @@ class TestGroupIsExported:
 
     def test_no_filter_exports_every_group(self):
         assert group_is_exported(self.GROUP, False, (None, None))
-        assert group_is_exported(self.GROUP, False, None)
 
     def test_an_excluded_group_is_left_out_even_with_messages(self):
         assert not group_is_exported(self.GROUP, True, (None, ["85212345678"]))
@@ -127,3 +125,14 @@ class TestGroupIsExported:
         assert group_is_exported(self.GROUP, False, (["85212345678"], None))
         assert group_is_exported(self.GROUP, True, (["99999"], None))
         assert not group_is_exported(self.GROUP, False, (["99999"], None))
+
+
+class TestUnknownFlags:
+    def test_a_missing_column_leaves_a_flag_null_and_the_merge_keeps_a_known_value(self):
+        assert member_entry(Identity(PHONE, None, None, None), None, 1)["active"] is None
+        merged = merge_members([
+            member_entry(Identity(PHONE, None, None, None), None, None),
+            member_entry(Identity(PHONE, LID, None, None), 1, 0),
+        ])
+        assert merged == [{"jid": PHONE, "lid": LID, "contact_name": None, "push_name": None,
+                           "active": True, "admin": False}]

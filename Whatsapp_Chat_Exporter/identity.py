@@ -1,6 +1,9 @@
 """Who a WhatsApp id belongs to: phone id, @lid id, contact name, push name."""
 
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, TYPE_CHECKING, Tuple
+
+if TYPE_CHECKING:
+    from Whatsapp_Chat_Exporter.data_model import ChatCollection
 
 PHONE_SUFFIX = "@s.whatsapp.net"
 LID_SUFFIX = "@lid"
@@ -78,8 +81,8 @@ def member_entry(identity: Identity, active: bool, admin: bool) -> Dict[str, Any
         "lid": identity.lid,
         "contact_name": identity.contact_name,
         "push_name": identity.push_name,
-        "active": bool(active),
-        "admin": bool(admin),
+        "active": None if active is None else bool(active),
+        "admin": None if admin is None else bool(admin),
     }
 
 
@@ -99,19 +102,27 @@ def merge_members(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for key in ("lid", "contact_name", "push_name"):
             current[key] = current[key] or entry[key]
         for key in ("active", "admin"):
-            current[key] = current[key] or entry[key]
+            if current[key] is None:
+                current[key] = entry[key]
+            elif entry[key] is not None:
+                current[key] = current[key] or entry[key]
     return list(merged.values())
 
 
-def group_is_exported(group_jid: str, has_messages: bool, filter_chat) -> bool:
+FilterChat = Tuple[Optional[List[str]], Optional[List[str]]]
+NO_FILTER: FilterChat = (None, None)
+
+
+def group_is_exported(group_jid: str, has_messages: bool, filter_chat: FilterChat = NO_FILTER) -> bool:
     """Whether a group passes the chat filter the export was run with.
 
-    The message queries include a chat when its id, or a member's id, holds one
-    of the include strings, and exclude it when its id holds an exclude string.
-    A group with messages in the export passed that filter; one without is
-    judged by its own id, so a group the person left out gets no member list.
+    The message queries keep a message when the chat id, or the sender's id,
+    holds an include string, and drop it when either holds an exclude string.
+    A group with messages in the export therefore passed the filter; one
+    without is judged by its own id, so a group the person left out gets no
+    member list.
     """
-    include, exclude = (filter_chat or (None, None))
+    include, exclude = filter_chat
     if exclude and any(term in group_jid for term in exclude):
         return False
     if include and not has_messages and not any(term in group_jid for term in include):
@@ -119,7 +130,8 @@ def group_is_exported(group_jid: str, has_messages: bool, filter_chat) -> bool:
     return True
 
 
-def assign_members(data, entries: Dict[str, List[Dict[str, Any]]], filter_chat=None) -> None:
+def assign_members(data: "ChatCollection", entries: Dict[str, List[Dict[str, Any]]],
+                   filter_chat: FilterChat = NO_FILTER) -> None:
     """Give every exported group chat its merged member list; other chats keep null."""
     for chat_jid, chat in data.items():
         if not chat_jid.endswith("@g.us"):
