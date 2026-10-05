@@ -333,18 +333,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             else:
                 current_chat = data.get_chat(contact_id)
 
-            # Create message object
-            ts = APPLE_TIME + content["ZMESSAGEDATE"]
-            message = Message(
-                from_me=content["ZISFROMME"],
-                timestamp=ts,
-                time=ts,
-                key_id=content["ZSTANZAID"][:17],
-                timezone_offset=timezone_offset,
-                message_type=content["ZMESSAGETYPE"],
-                received_timestamp=APPLE_TIME + content["ZSENTDATE"] if content["ZSENTDATE"] else None,
-                read_timestamp=None  # TODO: Add timestamp
-            )
+            message = new_message(content, timezone_offset)
 
             # Process message data
             invalid = process_message_data(
@@ -358,6 +347,24 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
     _add_group_members(db, data, identity_resolver, filter_chat)
+
+
+def new_message(content, timezone_offset):
+    """A Message for a ZWAMESSAGE row. key_id is the first 17 characters of the stanza id,
+    as upstream writes it; full_key_id is the whole stanza id."""
+    ts = APPLE_TIME + content["ZMESSAGEDATE"]
+    message = Message(
+        from_me=content["ZISFROMME"],
+        timestamp=ts,
+        time=ts,
+        key_id=content["ZSTANZAID"][:17],
+        timezone_offset=timezone_offset,
+        message_type=content["ZMESSAGETYPE"],
+        received_timestamp=APPLE_TIME + content["ZSENTDATE"] if content["ZSENTDATE"] else None,
+        read_timestamp=None  # TODO: Add timestamp
+    )
+    message.full_key_id = content["ZSTANZAID"]
+    return message
 
 
 def process_message_data(message, content, is_group_message, data, message_map, no_reply,
@@ -396,7 +403,8 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         quoted_msg_id_length = metadata[1]
         quoted = metadata[2:2 + quoted_msg_id_length]
         if len(quoted) == quoted_msg_id_length and quoted.isascii():
-            message.reply = quoted.decode("ascii")[:17]
+            message.reply_key_id = quoted.decode("ascii")
+            message.reply = message.reply_key_id[:17]
             message.quoted_data = message_map.get(message.reply)
 
     # Handle stickers
@@ -721,6 +729,7 @@ def process_call_record(content, chat, data, timezone_offset):
         key_id=content["ZCALLIDSTRING"],
         timezone_offset=timezone_offset
     )
+    call.full_key_id = call.key_id
 
     # Set sender info
     _jid = content["ZGROUPCALLCREATORUSERJIDSTRING"]

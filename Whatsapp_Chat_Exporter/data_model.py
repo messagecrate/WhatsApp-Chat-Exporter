@@ -362,7 +362,9 @@ class Message:
             self.read_timestamp = None
 
         # Extra attributes
+        self.full_key_id = None  # the whole id the backup stores; key_id may be a prefix of it
         self.reply = None
+        self.reply_key_id = None  # the whole id of the quoted message; reply may be a prefix of it
         self.quoted_data = None
         self.caption = None
         self.thumb = None  # Android specific

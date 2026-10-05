@@ -436,6 +436,7 @@ def _process_single_message(data, content, table_message, timezone_offset):
         received_timestamp=content["received_timestamp"],
         read_timestamp=content["read_timestamp"]
     )
+    message.full_key_id = content["key_id"]
 
     # Handle binary data
     if isinstance(content["data"], bytes):
@@ -452,6 +453,7 @@ def _process_single_message(data, content, table_message, timezone_offset):
     # Handle quoted messages
     if content["quoted"] is not None:
         message.reply = content["quoted"]
+        message.reply_key_id = content["quoted"]
         if content["quoted_data"] is not None and len(content["quoted_data"]) > 200:
             message.quoted_data = content["quoted_data"][:201] + "..."
         else:
@@ -1121,6 +1123,7 @@ def _process_call_record(content, chat, data, timezone_offset):
         received_timestamp=None,  # TODO: Add timestamp
         read_timestamp=None  # TODO: Add timestamp
     )
+    call.full_key_id = call.key_id
 
     # Get caller/callee name
     _jid = content["key_remote_jid"]
