@@ -306,7 +306,8 @@ class Message:
             received_timestamp: int = None,
             read_timestamp: int = None,
             timezone_offset: Optional[Timing] = Timing(0),
-            message_type: Optional[int] = None
+            message_type: Optional[int] = None,
+            full_key_id: Optional[str] = None
     ) -> None:
         """
         Initialize Message object.
@@ -320,6 +321,9 @@ class Message:
             read_timestamp (int, optional): When message was read. Defaults to None
             timezone_offset (int, optional): Hours offset from UTC. Defaults to 0
             message_type (Optional[int], optional): Type of message. Defaults to None
+            full_key_id (Optional[str], optional): The whole id the backup stores. On iPhone
+                key_id is its first 17 characters; on Android the two are equal. Defaults to
+                None, for a source that stores no id
 
         Raises:
             TypeError: If time is not a string or number
@@ -336,6 +340,7 @@ class Message:
 
         self.media = False
         self.key_id = key_id
+        self.full_key_id = full_key_id
         self.meta = False
         self.data = None
         self.sender = None
@@ -363,6 +368,9 @@ class Message:
 
         # Extra attributes
         self.reply = None
+        # The whole id of the quoted message. On iPhone reply is its first 17 characters.
+        # On Android reply and reply_key_id are equal.
+        self.reply_key_id = None
         self.quoted_data = None
         self.caption = None
         self.thumb = None  # Android specific
@@ -385,10 +393,11 @@ class Message:
             key_id=data["key_id"],
             message_type=data.get("message_type"),
             received_timestamp=data.get("received_timestamp"),
-            read_timestamp=data.get("read_timestamp")
+            read_timestamp=data.get("read_timestamp"),
+            full_key_id=data.get("full_key_id")  # null in an older export, never a guess
         )
         added = ("from_me", "timestamp", "time", "key_id", "message_type",
-                 "received_timestamp", "read_timestamp")
+                 "received_timestamp", "read_timestamp", "full_key_id")
         for key, value in data.items():
             if hasattr(message, key) and key not in added:
                 setattr(message, key, value)
