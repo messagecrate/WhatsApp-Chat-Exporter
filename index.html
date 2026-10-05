@@ -401,7 +401,25 @@
             </section>
 			
             <div class="readme-content">
-                <h1>Whatsapp-Chat-Exporter</h1>
+                <div class="markdown-alert markdown-alert-important">
+<p class="markdown-alert-title"><svg class="octicon octicon-report mr-2" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
+<p><strong>This is a fork, kept by <a href="https://github.com/messagecrate/message-crate">Message Crate</a>.</strong><br>The original is <a href="https://github.com/KnugiHK/WhatsApp-Chat-Exporter">KnugiHK/WhatsApp-Chat-Exporter</a>. If you want to export your WhatsApp chats, use the original: it is the maintained project, and it is what <code>pip install whatsapp-chat-exporter</code> installs.</p>
+<p><strong>Why the fork exists.</strong> Message Crate imports WhatsApp history from the JSON this tool writes (<code>--no-html -j</code>). Message Crate needs to know who sent each message, and the JSON does not say enough:</p>
+<ul>
+<li>A group message&#39;s <code>sender</code> is a contact&#39;s name or the digits of an id, never both, and the sender&#39;s WhatsApp id is not kept.</li>
+<li>An internal <code>@lid</code> id is written as bare digits, which read like a phone number.</li>
+<li>A group chat has no list of its members. (The fork now writes one: <code>members</code>.)</li>
+</ul>
+<p><strong>What the fork changes.</strong> It adds fields to the JSON, and carries two fixes until the original has them. The HTML output and the command line stay as they are upstream.</p>
+<p><strong>The rules of the fork.</strong></p>
+<ol>
+<li>Each change is also sent to the original as a pull request. The fork is the original plus those pull requests, and it shrinks each time one is merged.</li>
+<li><code>main</code> starts from the original&#39;s <code>main</code> (the code of release 0.13.0) and follows it.</li>
+<li>Message Crate downloads a release of this fork, pinned by checksum. When the original has everything Message Crate needs, Message Crate goes back to the original and this fork is archived.</li>
+</ol>
+<p>So far the fork adds <code>sender_jid</code> (the phone id behind an <code>@lid</code> id), <code>sender_lid</code>, <code>sender_contact_name</code> (the sender&#39;s name in the owner&#39;s address book) and <code>sender_push_name</code> (the name the sender gave their own WhatsApp profile) to each message in the JSON, <code>members</code> to each group chat (one entry per member, with <code>jid</code>, <code>lid</code>, <code>contact_name</code>, <code>push_name</code>, <code>active</code> and <code>admin</code>), and fixes crypt14 decryption at the known offsets and iOS quoted replies whose parent id is not 20 bytes. Each message also gains <code>full_key_id</code>, the whole id the backup stores. On iPhone <code>key_id</code> is its first 17 characters. Each reply gains <code>reply_key_id</code>, the whole id of the quoted message. The licence is MIT, as in the original; see <a href="LICENSE">LICENSE</a>.</p>
+</div>
+<h1>Whatsapp-Chat-Exporter</h1>
 <p>A customizable Android and iOS/iPadOS Whatsapp database parser that will give you the history of your Whatsapp conversations in HTML and JSON. Inspired by <a href="https://telegram.org/blog/export-and-more">Telegram Chat Export Tool</a>.  </p>
 <div class="markdown-alert markdown-alert-tip">
 <p class="markdown-alert-title"><svg class="octicon octicon-light-bulb mr-2" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
@@ -684,7 +702,7 @@ source licenses.
                 <a href="https://github.com/KnugiHK/WhatsApp-Chat-Exporter" style="color: white; margin: 0 10px;"><i class="fab fa-github fa-lg"></i></a>
                 <a href="https://matrix.to/#/#wtsexporter:matrix.org" style="color: white; margin: 0 10px;"><i class="fas fa-comments fa-lg"></i></a>
             </p>
-            <p><small>Last updated: 7/27/2026</small></p>
+            <p><small>Last updated: 10/5/2026</small></p>
         </div>
     </footer>
     
