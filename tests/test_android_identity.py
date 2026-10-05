@@ -53,7 +53,7 @@ def wa_db(rows):
     return db
 
 
-class TestLoadIdentityNames:
+class TestBuildIdentityResolver:
     def test_reads_contact_names_and_push_names(self):
         resolver = _build_identity_resolver(wa_db([(PHONE, "Ana Example", "ana"), ("1@s.whatsapp.net", None, "ben")]))
         assert resolver.contact_names == {PHONE: "Ana Example"}

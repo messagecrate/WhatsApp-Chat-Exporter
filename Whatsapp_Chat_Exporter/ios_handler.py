@@ -96,14 +96,17 @@ def _load_push_names(db):
 
 
 def _member_name_columns(db):
-    """The two name columns of ZWAGROUPMEMBER as SELECT terms, NULL for one a backup lacks."""
+    """Select the two name columns of ZWAGROUPMEMBER, or NULL for one the backup lacks."""
     present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
     terms = []
     for column in ("ZCONTACTNAME", "ZFIRSTNAME"):
         if column in present:
             terms.append(f"ZWAGROUPMEMBER.{column},")
         else:
-            logging.info(f"ZWAGROUPMEMBER has no {column} column; that name is left empty.")
+            logging.info(
+                f"ZWAGROUPMEMBER has no {column} column; "
+                "sender_contact_name falls back to the other column, or is left empty."
+            )
             terms.append(f"NULL AS {column},")
     return "\n            ".join(terms)
 
