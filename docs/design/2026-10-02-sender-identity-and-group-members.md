@@ -125,8 +125,8 @@ Measured on the backup.
 | Members | Every `ZWAGROUPMEMBER` row of the chat, with `ZISACTIVE` and `ZISADMIN`. In 153 cases two rows of one group are the same person. |
 
 - The tool extracts each database from the backup by its hashed file name.
-  `LID.sqlite` is not extracted today and must be added. When the backup has no
-  `LID.sqlite`, nothing is mapped and `sender_jid` is the stored id.
+  When the backup has no `LID.sqlite`, nothing is mapped and `sender_jid` is
+  the stored id.
 - `ZWAMESSAGE.ZPUSHNAME` is not read. Despite its name it is not a name: it is
   base64 text of a protobuf record, and on no received group message does that
   record hold a name.
@@ -145,7 +145,7 @@ databases. Not yet run on a real backup.
 | The phone id behind an `@lid` id | The `jid_map` table, which the message query already joins. The query also selects the unmapped id, for `sender_lid`. |
 | Contact name | `wa.db`, `wa_contacts.display_name`. |
 | Push name | `wa.db`, `wa_contacts.wa_name`. Android keeps no copy on the message. |
-| Members | `group_participant_user`. On the legacy layout, `group_participants`. Admin comes from the table's rank column. |
+| Members | `group_participant_user`, where admin is `rank > 0`. On the legacy layout, `group_participants`, where admin is `admin > 0`; its owner row has an empty `jid` and cannot become an entry, so it is left out. |
 
 Whether the owner of the phone has a row in the Android member table is not
 known; it is checked when a real Android backup is available.
@@ -199,7 +199,7 @@ of the backup, records counts only, and deletes its scratch files.
 | Step | Must hold on the backup |
 |---|---|
 | 1 | 1,427 received group messages move from an `@lid` id to a phone id in `sender_jid`, and carry the `@lid` id in `sender_lid`. No `sender_jid` is an `@lid` id. 15,570 messages have a `sender_jid`, as before. |
-| 2 | Of the 15,570 messages with a `sender_jid`, 7,468 have a `sender_push_name` and 981 have a `sender_contact_name`. Of the 5,708 messages whose `sender` is digits, at least 2,696 have a `sender_push_name`. The 2,054 messages with no member row have neither name. |
+| 2 | Of the 15,570 messages with a `sender_jid`, 7,468 have a `sender_push_name` and 8,022 have a `sender_contact_name` (981 in the first version, which read only the member row the message points to). Of the 5,708 messages whose `sender` is digits, at least 2,696 have a `sender_push_name`. The 2,054 messages with no member row have neither name. |
 | 3 | The 639 member rows of the 42 groups become one entry per person in each group; the check script computes the expected entries from the database. Every `sender_jid` in a group is the `jid` of an entry in that group's `members`. |
 
 **Nothing existing changes.** For each step, every field that existed before
@@ -225,7 +225,7 @@ messages, 17,624 received group messages, 42 groups.
 |---|---|
 | 1 | `sender_jid` is a phone id on 15,570 messages, an `@lid` id on none, and `null` on 2,054. `sender_lid` is set on 1,427. |
 | 2 | Of the 15,570 messages with a `sender_jid`: 4,316 have a contact name and a push name, 3,152 a push name only, 3,706 a contact name only, 4,396 neither. Of the 5,708 messages whose `sender` is digits, 2,698 have a push name. No message without a `sender_jid` has a name. |
-| 3 | The 42 groups hold 486 member entries, built from 639 member rows; 153 rows merged into another row's entry. 399 entries are active and 159 are admins. 484 entries have a phone id and 2 an `@lid` id. 173 carry an `@lid` id, 165 a contact name, 233 a push name. Every group has at least one entry. Every `sender_jid` in a group is the `jid` of an entry in that group. |
+| 3 | The 42 groups hold 486 member entries, built from 639 member rows; 153 rows merged into another row's entry. 399 entries are active and 159 are admins. 484 entries have a phone id as `jid` and 2 an `@lid` id. 173 have `lid` set, 165 a contact name, 233 a push name. Every group has at least one entry. Every `sender_jid` in a group is the `jid` of an entry in that group. |
 
 The contact name counts are from the final code, which takes a person's
 contact name from any member row with their id. A first version read only the

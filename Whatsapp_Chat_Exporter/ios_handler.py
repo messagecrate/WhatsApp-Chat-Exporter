@@ -12,7 +12,7 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members, phone_jid
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, assign_members, member_entry, phone_jid
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -95,24 +95,44 @@ def _load_push_names(db):
     return {row[0]: row[1] for row in rows if row[0]}
 
 
+def _member_column(present, column):
+    """`ZWAGROUPMEMBER.<column>` as a SELECT term, or NULL when the backup lacks the column."""
+    if column in present:
+        return f"ZWAGROUPMEMBER.{column}"
+    logging.info(f"ZWAGROUPMEMBER has no {column} column; what it holds is left empty.")
+    return f"NULL AS {column}"
+
+
+def _member_columns(db, *columns):
+    """The named ZWAGROUPMEMBER columns as SELECT terms, NULL for each one the backup lacks."""
+    present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
+    return ", ".join(_member_column(present, column) for column in columns)
+
+
 def _load_member_contact_names(db):
     """Map each member JID in ZWAGROUPMEMBER to its contact name, else its first name.
 
-    Empty when there is no such table. The first named row for a JID wins.
+    Empty when there is no such table. A contact name from any of a person's rows
+    wins over a first name; among rows of one kind, the first wins.
     """
     try:
         rows = db.execute(
-            "SELECT ZMEMBERJID, ZCONTACTNAME, ZFIRSTNAME FROM ZWAGROUPMEMBER ORDER BY Z_PK"
+            f"SELECT ZMEMBERJID, {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME')}"
+            " FROM ZWAGROUPMEMBER ORDER BY Z_PK"
         ).fetchall()
     except sqlite3.Error as e:
         logging.info(f"Member contact names could not be read ({e}); sender_contact_name is left empty.")
         return {}
-    names = {}
+    contact_names = {}
+    first_names = {}
     for member_jid, contact_name, first_name in rows:
-        name = contact_name or first_name
-        if member_jid and name and member_jid not in names:
-            names[member_jid] = name
-    return names
+        if not member_jid:
+            continue
+        if contact_name and member_jid not in contact_names:
+            contact_names[member_jid] = contact_name
+        if first_name and member_jid not in first_names:
+            first_names[member_jid] = first_name
+    return {jid: contact_names.get(jid) or first_names[jid] for jid in contact_names.keys() | first_names.keys()}
 
 
 def _build_identity_resolver(db, media_folder):
@@ -124,17 +144,14 @@ def _build_identity_resolver(db, media_folder):
     )
 
 
-def _add_group_members(db, data, identity_resolver):
-    """Set `members` on every group chat: one entry per person with a member row."""
+def _add_group_members(db, data, identity_resolver, filter_chat=(None, None)):
+    """Set `members` on every exported group chat: one entry per person with a member row."""
     entries = {}
     try:
-        rows = db.execute("""
+        rows = db.execute(f"""
             SELECT ZWACHATSESSION.ZCONTACTJID,
                 ZWAGROUPMEMBER.ZMEMBERJID,
-                ZWAGROUPMEMBER.ZCONTACTNAME,
-                ZWAGROUPMEMBER.ZFIRSTNAME,
-                ZWAGROUPMEMBER.ZISACTIVE,
-                ZWAGROUPMEMBER.ZISADMIN
+                {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME', 'ZISACTIVE', 'ZISADMIN')}
             FROM ZWAGROUPMEMBER
                 INNER JOIN ZWACHATSESSION
                     ON ZWAGROUPMEMBER.ZCHATSESSION = ZWACHATSESSION.Z_PK
@@ -147,11 +164,14 @@ def _add_group_members(db, data, identity_resolver):
     for chat_jid, member_jid, contact_name, first_name, is_active, is_admin in rows:
         if data.get_chat(chat_jid) is None or not member_jid:
             continue
-        identity = identity_resolver.resolve(member_jid, contact_name=contact_name or first_name)
+        # The resolver holds the best name across a person's rows, so a row
+        # that carries only a first name must not shadow it; the first name
+        # is the last resort.
+        identity = identity_resolver.resolve(member_jid, contact_name=contact_name)
+        if identity.contact_name is None and first_name:
+            identity = identity._replace(contact_name=first_name)
         entries.setdefault(chat_jid, []).append(member_entry(identity, is_active, is_admin))
-    for chat_jid, chat in data.items():
-        if chat_jid.endswith("@g.us"):
-            chat.members = merge_members(entries.get(chat_jid, []))
+    assign_members(data, entries, filter_chat)
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
@@ -321,7 +341,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
-    _add_group_members(db, data, identity_resolver)
+    _add_group_members(db, data, identity_resolver, filter_chat)
 
 
 def process_message_data(message, content, is_group_message, data, message_map, no_reply,

@@ -11,7 +11,7 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, assign_members, member_entry
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -127,8 +127,8 @@ def _group_member_rows(db, jid_map_exists):
     return None
 
 
-def _add_group_members(db, data):
-    """Set `members` on every group chat: one entry per member the database lists."""
+def _add_group_members(db, data, filter_chat=(None, None)):
+    """Set `members` on every exported group chat: one entry per member the database lists."""
     resolver = data.get_system("identity_resolver") or IdentityResolver()
     entries = {}
     try:
@@ -143,9 +143,7 @@ def _add_group_members(db, data):
             continue
         identity = resolver.resolve(stored_jid, mapped_jid=mapped_jid)
         entries.setdefault(group_jid, []).append(member_entry(identity, True, is_admin))
-    for chat_jid, chat in data.items():
-        if chat_jid.endswith("@g.us"):
-            chat.members = merge_members(entries.get(chat_jid, []))
+    assign_members(data, entries, filter_chat)
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
@@ -188,7 +186,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     _get_reactions(db, data)
-    _add_group_members(db, data)
+    _add_group_members(db, data, filter_chat)
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
 
 # Helper functions for message processing

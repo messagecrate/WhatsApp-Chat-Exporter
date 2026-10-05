@@ -2,7 +2,7 @@ import sqlite3
 
 from Whatsapp_Chat_Exporter.data_model import ChatStore
 from Whatsapp_Chat_Exporter.identity import (
-    Identity, IdentityResolver, member_entry, merge_members, phone_jid, row_value
+    Identity, IdentityResolver, group_is_exported, member_entry, merge_members, phone_jid
 )
 from Whatsapp_Chat_Exporter.utility import Device
 
@@ -63,16 +63,6 @@ def test_phone_jid_keeps_only_digits():
     assert phone_jid(None) is None
 
 
-def test_row_value_reads_a_dict_and_a_sqlite_row():
-    db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
-    row = db.execute("SELECT 1 AS a").fetchone()
-    assert row_value(row, "a") == 1
-    assert row_value(row, "b") is None
-    assert row_value({"a": 1}, "a") == 1
-    assert row_value({"a": 1}, "b") is None
-
-
 def test_member_entry_has_the_six_fields():
     entry = member_entry(Identity(PHONE, LID, "Ana Example", "ana"), True, False)
     assert entry == {
@@ -121,3 +111,19 @@ def test_a_merge_keeps_members_when_the_other_chat_has_none():
     old.members = [member_entry(Identity(PHONE, None, None, None), True, False)]
     old.merge_with(ChatStore(Device.IOS, "Group"))
     assert old.members == [member_entry(Identity(PHONE, None, None, None), True, False)]
+
+
+class TestGroupIsExported:
+    GROUP = "85212345678-1463926641@g.us"
+
+    def test_no_filter_exports_every_group(self):
+        assert group_is_exported(self.GROUP, False, (None, None))
+        assert group_is_exported(self.GROUP, False, None)
+
+    def test_an_excluded_group_is_left_out_even_with_messages(self):
+        assert not group_is_exported(self.GROUP, True, (None, ["85212345678"]))
+
+    def test_an_included_group_is_kept_by_its_id_or_by_its_messages(self):
+        assert group_is_exported(self.GROUP, False, (["85212345678"], None))
+        assert group_is_exported(self.GROUP, True, (["99999"], None))
+        assert not group_is_exported(self.GROUP, False, (["99999"], None))

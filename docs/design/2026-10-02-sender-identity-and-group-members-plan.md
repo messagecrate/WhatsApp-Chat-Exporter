@@ -1534,7 +1534,7 @@ def _add_group_members(db, data, identity_resolver):
             ORDER BY ZWAGROUPMEMBER.Z_PK
         """).fetchall()
     except sqlite3.Error as e:
-        logging.info(f"Group members could not be read ({e}); member lists are left empty.")
+        logging.info(f"Group members could not be read ({e}); members is left null.")
         rows = []
     for chat_jid, member_jid, contact_name, first_name, is_active, is_admin in rows:
         if data.get_chat(chat_jid) is None:
@@ -1708,8 +1708,8 @@ def _group_member_rows(db, jid_map_exists):
             WHERE jid IS NOT NULL AND jid != ''
             ORDER BY rowid
         """).fetchall()
-    logging.info("No group member table was found; member lists are left empty.")
-    return []
+    logging.info("No group member table was found; members is left null.")
+    return None
 
 
 def _add_group_members(db, data):
@@ -1719,7 +1719,7 @@ def _add_group_members(db, data):
     try:
         rows = _group_member_rows(db, data.get_system("jid_map_exists"))
     except sqlite3.Error as e:
-        logging.info(f"Group members could not be read ({e}); member lists are left empty.")
+        logging.info(f"Group members could not be read ({e}); members is left null.")
         rows = []
     for group_jid, stored_jid, mapped_jid, is_admin in rows:
         if data.get_chat(group_jid) is None or not stored_jid:

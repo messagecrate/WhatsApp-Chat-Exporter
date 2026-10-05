@@ -6,7 +6,7 @@
 >
 > - A group message's `sender` is a contact's name or the digits of an id, never both, and the sender's WhatsApp id is not kept.
 > - An internal `@lid` id is written as bare digits, which read like a phone number.
-> - A group chat has no list of its members.
+> - A group chat has no list of its members. (The fork now writes one: `members`.)
 >
 > **What the fork changes.** It adds fields to the JSON, and carries two fixes until the original has them. The HTML output and the command line stay as they are upstream.
 >
@@ -16,7 +16,7 @@
 > 2. `main` starts from the original's `main` (the code of release 0.13.0) and follows it.
 > 3. Message Crate downloads a release of this fork, pinned by checksum. When the original has everything Message Crate needs, Message Crate goes back to the original and this fork is archived.
 >
-> So far the fork adds `sender_jid` (the phone id behind an `@lid` id), `sender_lid`, `sender_contact_name` (the sender's name in the owner's address book) and `sender_push_name` (the name the sender gave their own WhatsApp profile) to each message in the JSON, and fixes crypt14 decryption at the known offsets and iOS quoted replies whose parent id is not 20 bytes. The licence is MIT, as in the original; see [LICENSE](LICENSE).
+> So far the fork adds `sender_jid` (the phone id behind an `@lid` id), `sender_lid`, `sender_contact_name` (the sender's name in the owner's address book) and `sender_push_name` (the name the sender gave their own WhatsApp profile) to each message in the JSON, `members` to each group chat (one entry per member, with `jid`, `lid`, `contact_name`, `push_name`, `active` and `admin`), and fixes crypt14 decryption at the known offsets and iOS quoted replies whose parent id is not 20 bytes. The licence is MIT, as in the original; see [LICENSE](LICENSE).
 
 # Whatsapp-Chat-Exporter
 [![Latest in PyPI](https://img.shields.io/pypi/v/whatsapp-chat-exporter?label=Latest%20in%20PyPI)](https://pypi.org/project/whatsapp-chat-exporter/)

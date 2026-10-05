@@ -23,11 +23,6 @@ def phone_jid(number: Optional[str]) -> Optional[str]:
     return digits + PHONE_SUFFIX if digits else None
 
 
-def row_value(row: Any, key: str) -> Any:
-    """Read a column from a dict or a sqlite3.Row; None when it is not there."""
-    return row[key] if key in row.keys() else None
-
-
 def _first_name(names: Dict[str, str], ids: Iterable[str]) -> Optional[str]:
     """The name recorded for the first of `ids` that has one, or None."""
     for jid in ids:
@@ -106,3 +101,29 @@ def merge_members(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for key in ("active", "admin"):
             current[key] = current[key] or entry[key]
     return list(merged.values())
+
+
+def group_is_exported(group_jid: str, has_messages: bool, filter_chat) -> bool:
+    """Whether a group passes the chat filter the export was run with.
+
+    The message queries include a chat when its id, or a member's id, holds one
+    of the include strings, and exclude it when its id holds an exclude string.
+    A group with messages in the export passed that filter; one without is
+    judged by its own id, so a group the person left out gets no member list.
+    """
+    include, exclude = (filter_chat or (None, None))
+    if exclude and any(term in group_jid for term in exclude):
+        return False
+    if include and not has_messages and not any(term in group_jid for term in include):
+        return False
+    return True
+
+
+def assign_members(data, entries: Dict[str, List[Dict[str, Any]]], filter_chat=None) -> None:
+    """Give every exported group chat its merged member list; other chats keep null."""
+    for chat_jid, chat in data.items():
+        if not chat_jid.endswith("@g.us"):
+            continue
+        if not group_is_exported(chat_jid, len(chat) > 0, filter_chat):
+            continue
+        chat.members = merge_members(entries.get(chat_jid, []))
