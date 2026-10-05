@@ -3,7 +3,7 @@ import sqlite3
 import types
 
 from Whatsapp_Chat_Exporter.__main__ import process_contacts
-from Whatsapp_Chat_Exporter.android_handler import _load_identity_names, _set_group_sender, contacts
+from Whatsapp_Chat_Exporter.android_handler import _build_identity_resolver, _set_group_sender, contacts
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
 
@@ -55,14 +55,17 @@ def wa_db(rows):
 
 class TestLoadIdentityNames:
     def test_reads_contact_names_and_push_names(self):
-        resolver = _load_identity_names(wa_db([(PHONE, "Ana Example", "ana"), ("1@s.whatsapp.net", None, "ben")]))
+        resolver = _build_identity_resolver(wa_db([(PHONE, "Ana Example", "ana"), ("1@s.whatsapp.net", None, "ben")]))
         assert resolver.contact_names == {PHONE: "Ana Example"}
         assert resolver.push_names == {PHONE: "ana", "1@s.whatsapp.net": "ben"}
 
-    def test_no_table_gives_no_names(self):
-        resolver = _load_identity_names(sqlite3.connect(":memory:"))
-        assert resolver.contact_names == {}
-        assert resolver.push_names == {}
+    def test_no_table_leaves_the_names_empty_and_the_run_continues(self, caplog):
+        data = ChatCollection()
+        with caplog.at_level(logging.INFO):
+            assert contacts(sqlite3.connect(":memory:"), data, None) is False
+        assert data.get_system("identity_resolver").contact_names == {}
+        assert data.get_system("identity_resolver").push_names == {}
+        assert "sender names are left empty" in caplog.text
 
     def test_contacts_stores_the_resolver(self):
         data = ChatCollection()

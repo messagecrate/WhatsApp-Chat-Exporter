@@ -139,3 +139,19 @@ class TestSenderNames:
         read = Message.from_json(message.to_json())
         assert read.sender_contact_name == "Ana Example"
         assert read.sender_push_name == "ana"
+
+
+class TestNamesOnlyOnReceivedGroupMessages:
+    def test_a_sent_group_message_has_no_names(self):
+        message = new_message()
+        resolver = IdentityResolver(contact_names={LID: "Ana"}, push_names={LID: "ana"})
+        process_message_data(message, ios_row(ZISFROMME=1), True, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name is None
+        assert message.sender_push_name is None
+
+    def test_a_one_to_one_message_has_no_names(self):
+        message = new_message()
+        resolver = IdentityResolver(contact_names={LID: "Ana"}, push_names={LID: "ana"})
+        process_message_data(message, ios_row(), False, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name is None
+        assert message.sender_push_name is None

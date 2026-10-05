@@ -95,6 +95,19 @@ def _load_push_names(db):
     return {row[0]: row[1] for row in rows if row[0]}
 
 
+def _member_name_columns(db):
+    """The two name columns of ZWAGROUPMEMBER as SELECT terms, NULL for one a backup lacks."""
+    present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
+    terms = []
+    for column in ("ZCONTACTNAME", "ZFIRSTNAME"):
+        if column in present:
+            terms.append(f"ZWAGROUPMEMBER.{column},")
+        else:
+            logging.info(f"ZWAGROUPMEMBER has no {column} column; that name is left empty.")
+            terms.append(f"NULL AS {column},")
+    return "\n            ".join(terms)
+
+
 def _build_identity_resolver(db, media_folder):
     """Load what the backup knows about people, once per run."""
     return IdentityResolver(
@@ -194,6 +207,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     logging.info(f"Processing messages...(0/{total_row_number})", extra={"clear": True})
 
     # Fetch messages
+    member_name_columns = _member_name_columns(db)
     messages_query = f"""
         SELECT ZCONTACTJID,
             ZWAMESSAGE.Z_PK,
@@ -202,8 +216,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             ZTEXT,
             ZMESSAGETYPE,
             ZWAGROUPMEMBER.ZMEMBERJID,
-            ZWAGROUPMEMBER.ZCONTACTNAME,
-            ZWAGROUPMEMBER.ZFIRSTNAME,
+            {member_name_columns}
             ZMETADATA,
             ZSTANZAID,
             ZGROUPINFO,
