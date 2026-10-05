@@ -11,7 +11,7 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver
+from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -89,6 +89,63 @@ def contacts(db, data, enrich_from_vcards):
     return True
 
 
+def _table_exists(db, name):
+    return db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).fetchone() is not None
+
+
+def _group_member_rows(db, jid_map_exists):
+    """Rows of (group JID, stored member JID, mapped member JID, is admin); None when there is no member table."""
+    if _table_exists(db, "group_participant_user"):
+        mapped = "COALESCE(phone_jid.raw_string, user_jid.raw_string)" if jid_map_exists else "user_jid.raw_string"
+        jid_map_join = """LEFT JOIN jid_map
+                            ON jid_map.lid_row_id = group_participant_user.user_jid_row_id
+                        LEFT JOIN jid phone_jid
+                            ON phone_jid._id = jid_map.jid_row_id""" if jid_map_exists else ""
+        return db.execute(f"""
+            SELECT group_jid.raw_string,
+                user_jid.raw_string,
+                {mapped},
+                group_participant_user.rank > 0
+            FROM group_participant_user
+                INNER JOIN jid group_jid
+                    ON group_jid._id = group_participant_user.group_jid_row_id
+                INNER JOIN jid user_jid
+                    ON user_jid._id = group_participant_user.user_jid_row_id
+                {jid_map_join}
+            ORDER BY group_participant_user.rowid
+        """).fetchall()
+    if _table_exists(db, "group_participants"):
+        return db.execute("""
+            SELECT gjid, jid, jid, admin > 0
+            FROM group_participants
+            WHERE jid IS NOT NULL AND jid != ''
+            ORDER BY rowid
+        """).fetchall()
+    logging.info("No group member table was found; members is left null.")
+    return None
+
+
+def _add_group_members(db, data, filter_chat=NO_FILTER):
+    """Set `members` on every exported group chat: one entry per member the database lists."""
+    resolver = data.get_system("identity_resolver") or IdentityResolver()
+    entries = {}
+    try:
+        rows = _group_member_rows(db, data.get_system("jid_map_exists"))
+    except sqlite3.Error as e:
+        logging.info(f"Group members could not be read ({e}); members is left null.")
+        return
+    if rows is None:
+        return
+    for group_jid, stored_jid, mapped_jid, is_admin in rows:
+        if data.get_chat(group_jid) is None or not stored_jid:
+            continue
+        identity = resolver.resolve(stored_jid, mapped_jid=mapped_jid)
+        entries.setdefault(group_jid, []).append(member_entry(identity, True, is_admin))
+    assign_members(data, entries, filter_chat)
+
+
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
     """
     Process WhatsApp messages from the database.
@@ -129,6 +186,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     _get_reactions(db, data)
+    _add_group_members(db, data, filter_chat)
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
 
 # Helper functions for message processing

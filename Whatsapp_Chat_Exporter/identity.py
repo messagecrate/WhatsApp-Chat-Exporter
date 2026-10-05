@@ -1,6 +1,9 @@
 """Who a WhatsApp id belongs to: phone id, @lid id, contact name, push name."""
 
-from typing import Any, Dict, Iterable, NamedTuple, Optional
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, TYPE_CHECKING, Tuple
+
+if TYPE_CHECKING:
+    from Whatsapp_Chat_Exporter.data_model import ChatCollection
 
 PHONE_SUFFIX = "@s.whatsapp.net"
 LID_SUFFIX = "@lid"
@@ -21,11 +24,6 @@ def phone_jid(number: Optional[str]) -> Optional[str]:
     """Build a phone JID from a phone number, keeping only its digits."""
     digits = "".join(char for char in (number or "") if char.isdigit())
     return digits + PHONE_SUFFIX if digits else None
-
-
-def row_value(row: Any, key: str) -> Any:
-    """Read a column from a dict or a sqlite3.Row; None when it is not there."""
-    return row[key] if key in row.keys() else None
 
 
 def _first_name(names: Dict[str, str], ids: Iterable[str]) -> Optional[str]:
@@ -74,3 +72,70 @@ class IdentityResolver:
             contact_name or _first_name(self.contact_names, ids),
             _first_name(self.push_names, ids),
         )
+
+
+def member_entry(identity: Identity, active: bool, admin: bool) -> Dict[str, Any]:
+    """One entry of a group chat's `members` list."""
+    return {
+        "jid": identity.jid,
+        "lid": identity.lid,
+        "contact_name": identity.contact_name,
+        "push_name": identity.push_name,
+        "active": None if active is None else bool(active),
+        "admin": None if admin is None else bool(admin),
+    }
+
+
+def merge_members(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge the entries of one group that share a jid, keeping first-seen order.
+
+    A backup can hold two member rows for one person: one under the @lid id and
+    one under the phone id. The merged entry keeps every fact either row has,
+    and is active or admin when either row is.
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        current = merged.get(entry["jid"])
+        if current is None:
+            merged[entry["jid"]] = dict(entry)
+            continue
+        for key in ("lid", "contact_name", "push_name"):
+            current[key] = current[key] or entry[key]
+        for key in ("active", "admin"):
+            if current[key] is None:
+                current[key] = entry[key]
+            elif entry[key] is not None:
+                current[key] = current[key] or entry[key]
+    return list(merged.values())
+
+
+FilterChat = Tuple[Optional[List[str]], Optional[List[str]]]
+NO_FILTER: FilterChat = (None, None)
+
+
+def group_is_exported(group_jid: str, has_messages: bool, filter_chat: FilterChat = NO_FILTER) -> bool:
+    """Whether a group passes the chat filter the export was run with.
+
+    The message queries keep a message when the chat id, or the sender's id,
+    holds an include string, and drop it when either holds an exclude string.
+    A group with messages in the export therefore passed the filter; one
+    without is judged by its own id, so a group the person left out gets no
+    member list.
+    """
+    include, exclude = filter_chat
+    if exclude and any(term in group_jid for term in exclude):
+        return False
+    if include and not has_messages and not any(term in group_jid for term in include):
+        return False
+    return True
+
+
+def assign_members(data: "ChatCollection", entries: Dict[str, List[Dict[str, Any]]],
+                   filter_chat: FilterChat = NO_FILTER) -> None:
+    """Give every exported group chat its merged member list; other chats keep null."""
+    for chat_jid, chat in data.items():
+        if not chat_jid.endswith("@g.us"):
+            continue
+        if not group_is_exported(chat_jid, len(chat) > 0, filter_chat):
+            continue
+        chat.members = merge_members(entries.get(chat_jid, []))

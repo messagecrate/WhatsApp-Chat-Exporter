@@ -12,7 +12,7 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, phone_jid, row_value
+from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry, phone_jid
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -95,28 +95,99 @@ def _load_push_names(db):
     return {row[0]: row[1] for row in rows if row[0]}
 
 
-def _member_name_columns(db):
-    """Select the two name columns of ZWAGROUPMEMBER, or NULL for one the backup lacks."""
+_MEMBER_COLUMN_FIELDS = {
+    "ZCONTACTNAME": "sender_contact_name and the members' contact_name fall back to ZFIRSTNAME, or are left empty",
+    "ZFIRSTNAME": "sender_contact_name and the members' contact_name come from ZCONTACTNAME alone",
+    "ZISACTIVE": "the members' active is left null",
+    "ZISADMIN": "the members' admin is left null",
+}
+
+
+def _member_columns(db, *columns, quiet=()):
+    """Select the named ZWAGROUPMEMBER columns, or NULL for one the backup lacks.
+
+    One log line per missing column; `quiet` names columns whose absence an
+    earlier query of the same run already logged.
+    """
     present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
     terms = []
-    for column in ("ZCONTACTNAME", "ZFIRSTNAME"):
+    for column in columns:
         if column in present:
-            terms.append(f"ZWAGROUPMEMBER.{column},")
-        else:
-            logging.info(
-                f"ZWAGROUPMEMBER has no {column} column; "
-                "sender_contact_name falls back to the other column, or is left empty."
-            )
-            terms.append(f"NULL AS {column},")
-    return "\n            ".join(terms)
+            terms.append(f"ZWAGROUPMEMBER.{column}")
+            continue
+        if column not in quiet:
+            logging.info(f"ZWAGROUPMEMBER has no {column} column; {_MEMBER_COLUMN_FIELDS[column]}.")
+        terms.append(f"NULL AS {column}")
+    return ", ".join(terms)
+
+
+def _load_member_contact_names(db, lid_to_phone):
+    """Map each member to its contact name, else its first name, keyed by the phone id.
+
+    Empty when there is no such table. A person's rows under an @lid id and under
+    the phone id are one person, so the names are keyed by the phone id where
+    `lid_to_phone` knows it. A contact name from any row wins over a first name;
+    among rows of one kind, the first wins.
+    """
+    try:
+        rows = db.execute(
+            f"SELECT ZMEMBERJID, {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME')}"
+            " FROM ZWAGROUPMEMBER ORDER BY Z_PK"
+        ).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Member contact names could not be read ({e}); sender_contact_name is left empty.")
+        return {}
+    contact_names = {}
+    first_names = {}
+    for member_jid, contact_name, first_name in rows:
+        if not member_jid:
+            continue
+        person = lid_to_phone.get(member_jid, member_jid)
+        if contact_name and person not in contact_names:
+            contact_names[person] = contact_name
+        if first_name and person not in first_names:
+            first_names[person] = first_name
+    return {jid: contact_names.get(jid) or first_names[jid] for jid in contact_names.keys() | first_names.keys()}
 
 
 def _build_identity_resolver(db, media_folder):
     """Load what the backup knows about people, once per run."""
+    lid_to_phone = _load_lid_map(media_folder)
     return IdentityResolver(
-        lid_to_phone=_load_lid_map(media_folder),
+        lid_to_phone=lid_to_phone,
+        contact_names=_load_member_contact_names(db, lid_to_phone),
         push_names=_load_push_names(db),
     )
+
+
+def _add_group_members(db, data, identity_resolver, filter_chat=NO_FILTER):
+    """Set `members` on every exported group chat: one entry per person with a member row."""
+    entries = {}
+    try:
+        rows = db.execute(f"""
+            SELECT ZWACHATSESSION.ZCONTACTJID,
+                ZWAGROUPMEMBER.ZMEMBERJID,
+                {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME', 'ZISACTIVE', 'ZISADMIN', quiet=('ZCONTACTNAME', 'ZFIRSTNAME'))}
+            FROM ZWAGROUPMEMBER
+                INNER JOIN ZWACHATSESSION
+                    ON ZWAGROUPMEMBER.ZCHATSESSION = ZWACHATSESSION.Z_PK
+            WHERE ZWAGROUPMEMBER.ZMEMBERJID IS NOT NULL
+            ORDER BY ZWAGROUPMEMBER.Z_PK
+        """).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Group members could not be read ({e}); members is left null.")
+        return
+    for chat_jid, member_jid, contact_name, first_name, is_active, is_admin in rows:
+        if data.get_chat(chat_jid) is None or not member_jid:
+            continue
+        # The resolver holds the best name across a person's rows, so a row
+        # that carries only a first name must not shadow it; the first name
+        # is the last resort.
+        identity = identity_resolver.resolve(member_jid, contact_name=contact_name)
+        if identity.contact_name is None and first_name:
+            identity = identity._replace(contact_name=first_name)
+        entries.setdefault(chat_jid, []).append(member_entry(identity, is_active, is_admin))
+    assign_members(data, entries, filter_chat)
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
@@ -210,7 +281,6 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     logging.info(f"Processing messages...(0/{total_row_number})", extra={"clear": True})
 
     # Fetch messages
-    member_name_columns = _member_name_columns(db)
     messages_query = f"""
         SELECT ZCONTACTJID,
             ZWAMESSAGE.Z_PK,
@@ -219,7 +289,6 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             ZTEXT,
             ZMESSAGETYPE,
             ZWAGROUPMEMBER.ZMEMBERJID,
-            {member_name_columns}
             ZMETADATA,
             ZSTANZAID,
             ZGROUPINFO,
@@ -288,6 +357,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
+    _add_group_members(db, data, identity_resolver, filter_chat)
 
 
 def process_message_data(message, content, is_group_message, data, message_map, no_reply,
@@ -306,10 +376,7 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         else:
             fallback = None
         message.sender = name or fallback
-        identity = (identity_resolver or IdentityResolver()).resolve(
-            content["ZMEMBERJID"],
-            contact_name=row_value(content, "ZCONTACTNAME") or row_value(content, "ZFIRSTNAME"),
-        )
+        identity = (identity_resolver or IdentityResolver()).resolve(content["ZMEMBERJID"])
         message.sender_jid = identity.jid
         message.sender_lid = identity.lid
         message.sender_contact_name = identity.contact_name
