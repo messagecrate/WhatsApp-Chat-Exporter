@@ -16,7 +16,7 @@
 > 2. `main` starts from the original's `main` (the code of release 0.13.0) and follows it.
 > 3. Message Crate downloads a release of this fork, pinned by checksum. When the original has everything Message Crate needs, Message Crate goes back to the original and this fork is archived.
 >
-> The fork has no changes to the code yet. This notice is the only difference from the original. The licence is MIT, as in the original; see [LICENSE](LICENSE).
+> What the fork has changed so far is in the JSON only: `sender_jid` (the phone id behind an `@lid` id) and `sender_lid` on each message. The licence is MIT, as in the original; see [LICENSE](LICENSE).
 
 # Whatsapp-Chat-Exporter
 [![Latest in PyPI](https://img.shields.io/pypi/v/whatsapp-chat-exporter?label=Latest%20in%20PyPI)](https://pypi.org/project/whatsapp-chat-exporter/)

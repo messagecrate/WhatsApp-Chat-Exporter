@@ -71,7 +71,7 @@ def _load_lid_map(media_folder):
         logging.info("LID.sqlite was not found; a sender stored under an @lid id keeps that id.")
         return {}
     try:
-        with closing(sqlite3.connect(path)) as lid_db:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as lid_db:
             rows = lid_db.execute(
                 "SELECT ZIDENTIFIER, ZPHONENUMBER FROM ZWAZACCOUNT WHERE ZPHONENUMBER IS NOT NULL"
             ).fetchall()

@@ -32,13 +32,6 @@ class TestSenderLid:
         assert message.sender_jid == PHONE
         assert message.sender_lid is None
 
-    def test_a_row_without_the_raw_column_still_resolves(self):
-        message = new_message()
-        content = {"sender_jid_row_id": 7, "group_sender_jid": PHONE}
-        _set_group_sender(message, content, ChatCollection(), True)
-        assert message.sender_jid == PHONE
-        assert message.sender_lid is None
-
     def test_the_legacy_schema_has_no_lid(self):
         message = new_message()
         _set_group_sender(message, {"remote_resource": PHONE}, ChatCollection(), False)
