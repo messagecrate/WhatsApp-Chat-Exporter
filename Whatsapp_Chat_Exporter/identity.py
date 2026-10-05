@@ -28,7 +28,8 @@ def row_value(row: Any, key: str) -> Any:
     return row[key] if key in row.keys() else None
 
 
-def _first_name(names: Dict[str, str], ids) -> Optional[str]:
+def _first_name(names: Dict[str, str], ids: Iterable[str]) -> Optional[str]:
+    """The name recorded for the first of `ids` that has one, or None."""
     for jid in ids:
         name = names.get(jid)
         if name:

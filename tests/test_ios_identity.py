@@ -267,3 +267,19 @@ class TestLoadMemberContactNames:
     def test_the_resolver_gets_the_member_contact_names(self, tmp_path):
         db = ios_member_db([(PHONE, "Ana Example", None, 1, 0)])
         assert _build_identity_resolver(db, str(tmp_path)).contact_names == {PHONE: "Ana Example"}
+
+
+class TestNamesOnlyOnReceivedGroupMessages:
+    def test_a_sent_group_message_has_no_names(self):
+        message = new_message()
+        resolver = IdentityResolver(contact_names={LID: "Ana"}, push_names={LID: "ana"})
+        process_message_data(message, ios_row(ZISFROMME=1), True, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name is None
+        assert message.sender_push_name is None
+
+    def test_a_one_to_one_message_has_no_names(self):
+        message = new_message()
+        resolver = IdentityResolver(contact_names={LID: "Ana"}, push_names={LID: "ana"})
+        process_message_data(message, ios_row(), False, ChatCollection(), {}, False, resolver)
+        assert message.sender_contact_name is None
+        assert message.sender_push_name is None

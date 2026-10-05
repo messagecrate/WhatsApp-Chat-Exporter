@@ -11,7 +11,7 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members, row_value
+from Whatsapp_Chat_Exporter.identity import IdentityResolver, member_entry, merge_members
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -20,15 +20,15 @@ from Whatsapp_Chat_Exporter.utility import get_chat_condition, safe_name, bytes_
 
 
 
-def _load_identity_names(db):
-    """Read contact names and push names from wa.db into an IdentityResolver."""
+def _build_identity_resolver(db):
+    """Read contact names and push names from wa.db into an IdentityResolver.
+
+    Raises sqlite3.Error when wa_contacts cannot be read; the caller decides
+    what the run does without names.
+    """
     contact_names = {}
     push_names = {}
-    try:
-        rows = db.execute("SELECT jid, display_name, wa_name FROM wa_contacts").fetchall()
-    except sqlite3.Error as e:
-        logging.info(f"Contact names could not be read ({e}); sender names are left empty.")
-        rows = []
+    rows = db.execute("SELECT jid, display_name, wa_name FROM wa_contacts").fetchall()
     for jid, display_name, wa_name in rows:
         if not jid:
             continue
@@ -50,9 +50,17 @@ def contacts(db, data, enrich_from_vcards):
 
     Returns:
         bool: False if no contacts found, True otherwise
+
+    Also stores the identity resolver that messages() reads for each group
+    sender's names, so this runs before messages().
     """
     c = db.cursor()
-    data.set_system("identity_resolver", _load_identity_names(db))
+    try:
+        data.set_system("identity_resolver", _build_identity_resolver(db))
+    except sqlite3.Error as e:
+        logging.info(f"Contact names could not be read ({e}); sender names are left empty.")
+        data.set_system("identity_resolver", IdentityResolver())
+        return False
     c.execute("SELECT count() FROM wa_contacts")
     total_row_number = c.fetchone()[0]
 
@@ -492,13 +500,12 @@ def _set_group_sender(message, content, data, table_message):
     stored_jid = mapped_jid = None
     if table_message:
         if content["sender_jid_row_id"] > 0:
-            _jid = content["group_sender_jid"]
-            mapped_jid = _jid
-            stored_jid = row_value(content, "group_sender_raw_jid") or _jid
-            if _jid in data:
-                name = data.get_chat(_jid).name
-            if "@" in _jid:
-                fallback = _jid.split('@')[0]
+            mapped_jid = content["group_sender_jid"]
+            stored_jid = content["group_sender_raw_jid"]
+            if mapped_jid in data:
+                name = data.get_chat(mapped_jid).name
+            if "@" in mapped_jid:
+                fallback = mapped_jid.split('@')[0]
     else:
         if content["remote_resource"] is not None:
             stored_jid = content["remote_resource"]

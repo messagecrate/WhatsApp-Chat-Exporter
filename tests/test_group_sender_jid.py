@@ -61,14 +61,14 @@ class TestIosGroupSenderJid:
 class TestAndroidGroupSenderJid:
     def test_sender_jid_is_kept_beside_the_name(self):
         message = new_message()
-        content = {"sender_jid_row_id": 7, "group_sender_jid": MEMBER}
+        content = {"sender_jid_row_id": 7, "group_sender_jid": MEMBER, "group_sender_raw_jid": MEMBER}
         _set_group_sender(message, content, collection_with_named_member(Device.ANDROID), True)
         assert message.sender == "Friend"
         assert message.sender_jid == MEMBER
 
     def test_sender_jid_is_kept_when_the_sender_has_no_name(self):
         message = new_message()
-        content = {"sender_jid_row_id": 7, "group_sender_jid": MEMBER}
+        content = {"sender_jid_row_id": 7, "group_sender_jid": MEMBER, "group_sender_raw_jid": MEMBER}
         _set_group_sender(message, content, ChatCollection(), True)
         assert message.sender == "85212345678"
         assert message.sender_jid == MEMBER

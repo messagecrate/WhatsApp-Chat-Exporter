@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import os
+import pathlib
 import logging
 import shutil
 import sqlite3
@@ -71,7 +72,8 @@ def _load_lid_map(media_folder):
         logging.info("LID.sqlite was not found; a sender stored under an @lid id keeps that id.")
         return {}
     try:
-        with closing(sqlite3.connect(path)) as lid_db:
+        uri = pathlib.Path(path).resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as lid_db:
             rows = lid_db.execute(
                 "SELECT ZIDENTIFIER, ZPHONENUMBER FROM ZWAZACCOUNT WHERE ZPHONENUMBER IS NOT NULL"
             ).fetchall()
