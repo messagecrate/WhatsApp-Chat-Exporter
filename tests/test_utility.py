@@ -111,7 +111,8 @@ class TestDetermineDay:
     """
 
     @pytest.fixture(autouse=True)
-    def utc(self, monkeypatch):
+    def pin_tz_to_utc(self, monkeypatch):
+        """Set the local time zone to UTC; without time.tzset, do nothing."""
         if not hasattr(time, "tzset"):
             yield
             return
