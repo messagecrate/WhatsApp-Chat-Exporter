@@ -2,10 +2,10 @@
 
 A real iPhone backup stores ZMEDIALOCALPATH both as "Media/..." and as
 "/Media/..." (with a leading slash). Both name a file under Message/ in
-the app group directory. These tests guard the lookup as it is on main:
-they fail if a change to how the path is built (for example stripping
-or rejoining the leading slash so that "Message/" is lost) stops either
-shape from being found, or changes the "data" value the export writes.
+the app group directory. These tests fail if a change to how the path
+is built (for example stripping or rejoining the leading slash so that
+"Message/" is lost) stops either shape from being found, or changes the
+"data" value the export writes.
 """
 from mimetypes import MimeTypes
 
@@ -51,7 +51,8 @@ def app_group(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("local_path, data", [
     (LOCAL_PATH, "Message/" + LOCAL_PATH),
-    # The leading slash is kept as a double slash in "data" today.
+    # Upstream writes the leading slash as a double slash in "data". The
+    # fork changes existing JSON values only on purpose, so it is pinned.
     ("/" + LOCAL_PATH, "Message//" + LOCAL_PATH),
 ])
 def test_media_found_for_both_path_shapes(app_group, local_path, data):

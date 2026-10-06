@@ -226,7 +226,7 @@ class BackupExtractor:
                         try:
                             os.makedirs(destination, exist_ok=True)
                         except FileExistsError:
-                            pass  # A file is already at this path; keep it.
+                            pass  # A file is at this path; leave it, as os.mkdir did.
                     elif flags == 1:  # File
                         shutil.copyfile(os.path.join(self.base_dir, folder, hashes), destination)
                         metadata = BPListReader(row["metadata"]).parse()
