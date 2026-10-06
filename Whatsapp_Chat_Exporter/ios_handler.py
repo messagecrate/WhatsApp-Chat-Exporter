@@ -7,13 +7,15 @@ import shutil
 import sqlite3
 from contextlib import closing
 from glob import glob
+from typing import NamedTuple, Optional
 from tqdm import tqdm
 from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
 from Whatsapp_Chat_Exporter.identity import (
-    NO_FILTER, IdentityResolver, assign_members, member_entry, phone_jid, reaction_entry
+    NO_FILTER, IdentityResolver, assign_members, member_entry, phone_jid, reaction_entry,
+    start_reaction_details
 )
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
@@ -243,6 +245,14 @@ def _protobuf_value(fields, field, wire_type):
     return found[1] if found is not None and found[0] == wire_type else None
 
 
+class ReceiptReaction(NamedTuple):
+    """One reaction in a ZRECEIPTINFO blob."""
+    from_me: bool
+    jid: Optional[str]  # The reactor's JID as stored; None on the owner's reaction
+    emoji: str
+    timestamp_ms: Optional[int]
+
+
 def reactions_from_receipt_info(blob):
     """Read the reactions in a ZWAMESSAGEINFO.ZRECEIPTINFO blob.
 
@@ -252,8 +262,8 @@ def reactions_from_receipt_info(blob):
     owner of the phone (1 the reaction's id, 2 the emoji, 3 the time). An entry
     with no emoji is a withdrawn reaction and is left out.
 
-    Returns a list of (from_me, stored JID or None, emoji, time in milliseconds
-    or None). Empty when the blob holds no reaction or cannot be read.
+    Returns a list of ReceiptReaction, empty when the blob holds no reaction,
+    or None when the blob cannot be read.
     """
     reactions = []
     try:
@@ -276,9 +286,9 @@ def reactions_from_receipt_info(blob):
                     emoji = _protobuf_value(fields, 2, 2)
                     timestamp = _protobuf_value(fields, 3, 0)
                 if emoji:
-                    reactions.append((entry_field == 2, jid, emoji.decode("utf-8"), timestamp))
+                    reactions.append(ReceiptReaction(entry_field == 2, jid, emoji.decode("utf-8"), timestamp))
     except (ValueError, UnicodeDecodeError):
-        return []
+        return None
     return reactions
 
 
@@ -297,17 +307,25 @@ def _add_reactions(db, data, identity_resolver):
             WHERE ZWAMESSAGEINFO.ZRECEIPTINFO IS NOT NULL
         """).fetchall()
     except sqlite3.Error as e:
-        logging.info(f"Reactions could not be read ({e}); reaction_details is left empty.")
+        logging.info(f"Reactions could not be read ({e}); reaction_details is left null.")
         return
+    start_reaction_details(data)
+    unreadable = 0
     for chat_jid, message_pk, receipt_info in rows:
         chat = data.get_chat(chat_jid)
         message = chat.get_message(message_pk) if chat is not None else None
         if message is None:
             continue
+        reactions = reactions_from_receipt_info(receipt_info)
+        if reactions is None:
+            unreadable += 1
+            continue
         message.reaction_details = [
-            reaction_entry(emoji, from_me, identity_resolver.resolve(jid), timestamp)
-            for from_me, jid, emoji, timestamp in reactions_from_receipt_info(receipt_info)
+            reaction_entry(r.emoji, r.from_me, identity_resolver.resolve(r.jid), r.timestamp_ms)
+            for r in reactions
         ]
+    if unreadable:
+        logging.info(f"{unreadable} receipt records could not be decoded; their messages get an empty reaction_details.")
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):

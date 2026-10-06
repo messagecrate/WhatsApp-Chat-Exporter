@@ -3,6 +3,7 @@
 Every database here is built in memory with made-up rows, and every receipt
 blob is assembled by hand from the protobuf wire format.
 """
+import logging
 import sqlite3
 
 from Whatsapp_Chat_Exporter import android_handler, ios_handler
@@ -137,29 +138,47 @@ class TestIosReactions:
         [message] = ios_reactions(receipt_info(other_reaction(PHONE, THUMBS_UP)))
         assert message.reactions == {}
 
-    def test_a_backup_without_receipt_info_leaves_the_field_empty(self):
+    def test_a_message_without_receipt_info_has_an_empty_list(self):
+        data = ChatCollection()
+        chat = data.add_chat(GROUP, ChatStore(Device.IOS))
+        chat.add_message(1, new_message())
+        chat.add_message(2, new_message())
+        ios_handler._add_reactions(ios_db([receipt_info(own_reaction(HEART))]), data, IdentityResolver())
+        assert chat.get_message(2).reaction_details == []
+
+    def test_a_backup_without_receipt_info_leaves_the_field_null(self, caplog):
         data = ChatCollection()
         data.add_chat(GROUP, ChatStore(Device.IOS)).add_message(1, new_message())
-        ios_handler._add_reactions(sqlite3.connect(":memory:"), data, IdentityResolver())
-        assert data.get_chat(GROUP).get_message(1).reaction_details == []
+        with caplog.at_level(logging.INFO):
+            ios_handler._add_reactions(sqlite3.connect(":memory:"), data, IdentityResolver())
+        assert data.get_chat(GROUP).get_message(1).reaction_details is None
+        assert "reaction_details is left null" in caplog.text
+
+    def test_an_undecodable_blob_is_logged(self, caplog):
+        with caplog.at_level(logging.INFO):
+            ios_reactions(b"\xff\xff\xff")
+        assert "1 receipt records could not be decoded" in caplog.text
 
 
 class TestReceiptInfoDecoding:
-    def test_garbage_gives_no_reaction(self):
-        assert reactions_from_receipt_info(b"\xff\xff\xff") == []
-        assert reactions_from_receipt_info(b"\x3f") == []
+    def test_garbage_cannot_be_read(self):
+        assert reactions_from_receipt_info(b"\xff\xff\xff") is None
+        assert reactions_from_receipt_info(b"\x3f") is None
+
+    def test_no_blob_holds_no_reaction(self):
         assert reactions_from_receipt_info(None) == []
 
-    def test_an_emoji_that_is_not_utf8_gives_no_reaction(self):
-        assert reactions_from_receipt_info(receipt_info(other_reaction(PHONE, b"\xff"))) == []
+    def test_an_emoji_that_is_not_utf8_cannot_be_read(self):
+        assert reactions_from_receipt_info(receipt_info(other_reaction(PHONE, b"\xff"))) is None
 
     def test_reads_the_time(self):
         assert reactions_from_receipt_info(receipt_info(own_reaction(HEART, timestamp=5))) == [
             (True, None, HEART, 5)]
 
 
-def android_db(reactions, jid_map=None):
-    """jid rows: 1 group, 2 PHONE, 3 LID, 4 BEN, 5 UNMAPPED_LID. Message row 7 in chat 1.
+def android_db(reactions, jid_map=None, chat_jid_row=1):
+    """jid rows: 1 group, 2 PHONE, 3 LID, 4 BEN, 5 UNMAPPED_LID. Message row 7 in chat 1,
+    whose jid row is `chat_jid_row`.
 
     reactions: (sender_jid_row_id, from_me, reaction).
     """
@@ -169,7 +188,7 @@ def android_db(reactions, jid_map=None):
     db.executemany("INSERT INTO jid VALUES (?, ?)",
                    [(1, GROUP), (2, PHONE), (3, LID), (4, BEN), (5, UNMAPPED_LID)])
     db.execute("CREATE TABLE chat (_id INTEGER PRIMARY KEY, jid_row_id INTEGER)")
-    db.execute("INSERT INTO chat VALUES (1, 1)")
+    db.execute("INSERT INTO chat VALUES (1, ?)", (chat_jid_row,))
     db.execute("CREATE TABLE message_add_on (_id INTEGER PRIMARY KEY, parent_message_row_id INTEGER,"
                " chat_row_id INTEGER, from_me INTEGER, sender_jid_row_id INTEGER)")
     db.execute("CREATE TABLE message_add_on_reaction (message_add_on_row_id INTEGER, reaction TEXT,"
@@ -183,12 +202,12 @@ def android_db(reactions, jid_map=None):
     return db
 
 
-def android_reactions(reactions, jid_map=None):
+def android_reactions(reactions, jid_map=None, chat_jid=GROUP, chat_jid_row=1):
     data = ChatCollection()
-    data.add_chat(GROUP, ChatStore(Device.ANDROID, "Group")).add_message(7, new_message())
+    data.add_chat(chat_jid, ChatStore(Device.ANDROID, "Chat")).add_message(7, new_message())
     data.set_system("jid_map_exists", jid_map is not None)
-    android_handler._get_reactions(android_db(reactions, jid_map), data)
-    return data.get_chat(GROUP).get_message(7)
+    android_handler._get_reactions(android_db(reactions, jid_map, chat_jid_row), data)
+    return data.get_chat(chat_jid).get_message(7)
 
 
 class TestAndroidReactions:
@@ -208,6 +227,12 @@ class TestAndroidReactions:
         message = android_reactions([(5, 0, THUMBS_UP)], jid_map=[(3, 2)])
         assert message.reaction_details == [entry(THUMBS_UP, jid=UNMAPPED_LID, lid=UNMAPPED_LID)]
 
+    def test_a_chat_stored_under_the_phone_id_behind_its_lid(self):
+        # The message query stores an @lid chat under the phone id jid_map gives.
+        message = android_reactions([(3, 0, THUMBS_UP)], jid_map=[(3, 2)], chat_jid=PHONE, chat_jid_row=3)
+        assert message.reaction_details == [entry(THUMBS_UP, jid=PHONE, lid=LID)]
+        assert message.reactions == {}  # upstream's map misses this chat, as before
+
     def test_the_owners_reaction_has_no_id(self):
         message = android_reactions([(None, 1, HEART)])
         assert message.reaction_details == [entry(HEART, from_me=True)]
@@ -217,11 +242,16 @@ class TestAndroidReactions:
         assert message.reaction_details == [entry(HEART, jid=BEN)]
         assert message.reactions == {"85212345678": "", "85287654321": HEART}
 
-    def test_no_reaction_table_leaves_the_field_empty(self):
+    def test_a_message_without_reactions_has_an_empty_list(self):
+        assert android_reactions([]).reaction_details == []
+
+    def test_no_reaction_table_leaves_the_field_null(self, caplog):
         data = ChatCollection()
         data.add_chat(GROUP, ChatStore(Device.ANDROID, "Group")).add_message(7, new_message())
-        android_handler._get_reactions(sqlite3.connect(":memory:"), data)
-        assert data.get_chat(GROUP).get_message(7).reaction_details == []
+        with caplog.at_level(logging.INFO):
+            android_handler._get_reactions(sqlite3.connect(":memory:"), data)
+        assert data.get_chat(GROUP).get_message(7).reaction_details is None
+        assert "message_add_on" in caplog.text
 
 
 def test_reaction_details_is_written_to_json_and_read_back():
@@ -230,5 +260,11 @@ def test_reaction_details_is_written_to_json_and_read_back():
     assert Message.from_json(message.to_json()).reaction_details == [entry(THUMBS_UP, jid=PHONE, lid=LID)]
 
 
-def test_a_new_message_has_an_empty_list():
-    assert new_message().to_json()["reaction_details"] == []
+def test_a_new_message_has_null_until_reactions_are_read():
+    assert new_message().to_json()["reaction_details"] is None
+
+
+def test_an_older_export_without_the_field_reads_back_null():
+    data = new_message().to_json()
+    del data["reaction_details"]
+    assert Message.from_json(data).reaction_details is None
