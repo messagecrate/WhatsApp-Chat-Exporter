@@ -523,6 +523,12 @@ def _set_group_sender(message, content, data, table_message):
     message.sender_push_name = identity.push_name
 
 
+# message_system.action_type values that are an action in a group, as
+# determine_metadata words them: renamed, added, left, icon changed, removed,
+# created, added someone, removed someone, joined by link, description changed.
+GROUP_ACTION_TYPES = frozenset({1, 4, 5, 6, 7, 11, 12, 14, 20, 27})
+
+
 def _process_metadata_message(message, content, data, table_message):
     """Process metadata message."""
     message.meta = True
@@ -551,6 +557,11 @@ def _process_metadata_message(message, content, data, table_message):
 
     if isinstance(message.data, str) and "<br>" in message.data:
         message.safe = True
+
+    if (content["jid_type"] == JidType.GROUP and message.data is not None
+            and (content["is_me_joined"] == 1 or content["action_type"] in GROUP_ACTION_TYPES)):
+        message.group_action = message.data
+        message.group_action_jid = message.sender_jid
 
     if message.data is None:
         if content["video_call"] is not None:  # Missed call

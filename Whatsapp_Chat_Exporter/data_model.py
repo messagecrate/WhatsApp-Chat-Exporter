@@ -348,6 +348,11 @@ class Message:
         self.sender_lid = None
         self.sender_contact_name = None
         self.sender_push_name = None
+        # The text of a group action, such as a member joining or the group being renamed,
+        # and the id of the member who acted, as sender_jid holds an id. None on any other
+        # message, and where the backup does not say.
+        self.group_action = None
+        self.group_action_jid = None
         self.safe = False
         self.mime = None
         self.message_type = message_type

@@ -282,6 +282,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     logging.info(f"Processing messages...(0/{total_row_number})", extra={"clear": True})
 
     # Fetch messages
+    group_event_type = _group_event_type_column(db)
     messages_query = f"""
         SELECT ZCONTACTJID,
             ZWAMESSAGE.Z_PK,
@@ -289,6 +290,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             ZMESSAGEDATE,
             ZTEXT,
             ZMESSAGETYPE,
+            {group_event_type},
             ZWAGROUPMEMBER.ZMEMBERJID,
             ZMETADATA,
             ZSTANZAID,
@@ -350,6 +352,15 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     _add_group_members(db, data, identity_resolver, filter_chat)
 
 
+def _group_event_type_column(db):
+    """ZWAMESSAGE.ZGROUPEVENTTYPE, or NULL when the backup lacks the column."""
+    present = {row[1] for row in db.execute("PRAGMA table_info(ZWAMESSAGE)").fetchall()}
+    if "ZGROUPEVENTTYPE" in present:
+        return "ZWAMESSAGE.ZGROUPEVENTTYPE"
+    logging.info("ZWAMESSAGE has no ZGROUPEVENTTYPE column; group_action is set only from the text of an action.")
+    return "NULL AS ZGROUPEVENTTYPE"
+
+
 def message_from_row(content, timezone_offset):
     """A Message for a ZWAMESSAGE row. key_id is the first 17 characters of the stanza id,
     as upstream writes it. full_key_id is the whole stanza id."""
@@ -394,7 +405,7 @@ def process_message_data(message, content, is_group_message, data, message_map, 
 
     # Handle metadata messages
     if content["ZMESSAGETYPE"] == 6:
-        return process_metadata_message(message, content, is_group_message, data)
+        return process_metadata_message(message, content, is_group_message, data, identity_resolver)
 
     # Handle quoted replies
     metadata = content["ZMETADATA"]
@@ -418,51 +429,97 @@ def process_message_data(message, content, is_group_message, data, message_map, 
     return False  # Message is valid
 
 
-def _parse_group_action(ztext, data):
+UNSUPPORTED_GROUP_ACTION = "Unsupported WhatsApp internal message."
+
+# ZGROUPEVENTTYPE values whose meaning is known. Other values are written as
+# UNSUPPORTED_GROUP_ACTION when the row has a text, and left None when it has none.
+GROUP_EVENT_RENAMED = 1
+GROUP_EVENT_JOINED = 2
+GROUP_EVENT_LEFT = 3
+GROUP_EVENT_PICTURE_CHANGED = 4
+
+
+def _member_display_name(jid, data):
+    """A member's name as `sender` gives it: the name of a chat with them, else the digits of the id."""
+    if not jid:
+        return None
+    name = data.get_chat(jid).name if jid in data else None
+    fallback = jid.split('@')[0] if "@" in jid else None
+    return name or fallback
+
+
+def _parse_group_action(content, data, actor_name):
+    """The text of a group action and the id of the member who acted, as the row states them.
+
+    `actor_name` names the member the row points to ("You" for the owner). The id is
+    the one the backup stores; the caller resolves it. Either value is None where the
+    row does not say.
+    """
+    ztext = content["ZTEXT"]
+    event_type = content["ZGROUPEVENTTYPE"]
+    actor_jid = content["ZMEMBERJID"] if not content["ZISFROMME"] else None
+    actor = actor_name or "Someone"
+
+    if ztext is None:
+        if event_type == GROUP_EVENT_LEFT:
+            return f"{actor} left the group", actor_jid
+        if event_type == GROUP_EVENT_PICTURE_CHANGED:
+            return f"{actor} changed the group picture", actor_jid
+        return None, None
+
     if ztext.endswith("@lid") or ztext.endswith("@s.whatsapp.net"):
-        # This is likely a group member change action
-        # Not really sure actually
-        name = None
-        if ztext in data:
-            name = data.get_chat(ztext).name
-        if "@" in ztext:
-            fallback = ztext.split('@')[0]
-        else:
-            fallback = None
-        entity = name or fallback
+        if event_type == GROUP_EVENT_JOINED:
+            return f"{_member_display_name(ztext, data)} joined the group", ztext
+        return UNSUPPORTED_GROUP_ACTION, None
 
-        return f"{entity} join the group"
-
-    elif ztext.startswith("{") and ztext.endswith("}"):
+    if ztext.startswith("{") and ztext.endswith("}"):
         try:
             metadata = json.loads(ztext)
         except json.JSONDecodeError:
-            return ztext  # Not a JSON string, return as-is
-        entity = metadata.get('author', 'Someone')
-        if entity is not "Someone":
-            name = None
-            if entity in data:
-                name = data.get_chat(entity).name
-            if "@" in entity:
-                fallback = entity.split('@')[0]
-            else:
-                fallback = None
-            entity = name or fallback
-        return f"{entity} changed the group name to {metadata.get('subject', 'Unknown')}."
-    elif ztext == "admin_add":
-        return f"The administrator has restricted participant additions to admins only."
-    else:
-        return "Unsupported WhatsApp internal message."
+            return UNSUPPORTED_GROUP_ACTION, None
+        if not isinstance(metadata, dict):
+            return UNSUPPORTED_GROUP_ACTION, None
+        # A stored author can be null; such an action has no named author.
+        author = metadata.get("author")
+        author = author if isinstance(author, str) and author else None
+        subject = metadata.get("subject")
+        if isinstance(subject, str) and subject:
+            entity = _member_display_name(author, data) or "Someone"
+            return f"{entity} changed the group name to {subject}.", author
+        return UNSUPPORTED_GROUP_ACTION, author
+
+    if ztext == "admin_add":
+        return "The administrator has restricted participant additions to admins only.", None
+
+    if event_type == GROUP_EVENT_RENAMED:
+        return f"{actor} changed the group name to {ztext}.", actor_jid
+    return UNSUPPORTED_GROUP_ACTION, None
 
 
-def process_metadata_message(message, content, is_group_message, data):
-    """Process metadata messages (action_type 6)."""
+def process_metadata_message(message, content, is_group_message, data, identity_resolver=None):
+    """Process metadata messages (action_type 6).
+
+    `data` is what the HTML shows and stays as upstream's main writes it. The
+    group action's own text goes to `group_action`, and the member who acted to
+    `group_action_jid`.
+    """
     if is_group_message:
+        actor_name = "You" if content["ZISFROMME"] else message.sender
+        text, actor_jid = _parse_group_action(content, data, actor_name)
+        message.group_action = text
+        message.group_action_jid = (identity_resolver or IdentityResolver()).resolve(actor_jid).jid
         # Group
         if content["ZTEXT"] is not None:
-            message.data = _parse_group_action(content["ZTEXT"], data)
-            message.meta = True
-            return False
+            # Changed name
+            try:
+                int(content["ZTEXT"])
+            except ValueError:
+                msg = f"The group name changed to {content['ZTEXT']}"
+                message.data = msg
+                message.meta = True
+                return False  # Valid message
+            else:
+                return True  # Invalid message
         else:
             message.data = None
             return False
