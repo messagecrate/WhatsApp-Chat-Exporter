@@ -256,7 +256,16 @@ to a one-to-one chat, whose `members` is `null`.
 - Reactions on an iPhone backup: #4.
 - iPhone media that is not found: #5.
 - Polls: #6.
-- The text of group actions: #7.
+- The text of group actions: #7. Built after this design as two fields on
+  every message, both `null` unless the message is a group action:
+  `group_action`, the text, plain text without HTML; and `group_action_jid`,
+  the id of the member the text names, resolved as `sender_jid` is. On
+  iPhone the kind of action comes from `ZWAMESSAGE.ZGROUPEVENTTYPE` (1 renamed,
+  2 joined, 3 left, 4 picture changed) or a JSON `ZTEXT` with a `subject` (a
+  rename); any other action is `null`. On Android `group_action` is the text
+  `determine_metadata` writes for a group action, and `null` when it would
+  quote a name or description the row does not hold. `group_action_jid` is
+  `null` when the owner acted or the text names no member.
 - Releasing this fork, and Message Crate downloading a pinned release of it:
   messagecrate/message-crate#1053.
 - Reading the new fields in Message Crate: messagecrate/message-crate#1092.
