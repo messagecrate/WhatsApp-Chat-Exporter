@@ -381,6 +381,9 @@ class Message:
         self.thumb = None  # Android specific
         self.sticker = False
         self.reactions = {}
+        # One entry per reaction: emoji, from_me, the reactor's jid and lid, timestamp.
+        # None until the backup's reaction source has been read.
+        self.reaction_details = None
 
     def to_json(self) -> Dict[str, Any]:
         """Convert message to JSON-serializable dict."""

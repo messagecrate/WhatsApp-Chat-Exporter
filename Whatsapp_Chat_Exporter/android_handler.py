@@ -11,7 +11,10 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry
+from Whatsapp_Chat_Exporter.identity import (
+    NO_FILTER, NO_IDENTITY, IdentityResolver, assign_members, member_entry, reaction_entry,
+    start_reaction_details
+)
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -95,14 +98,24 @@ def _table_exists(db, name):
     ).fetchone() is not None
 
 
+def _phone_jid_join(row_id_column, alias, jid_map_exists):
+    """Join the phone JID that jid_map gives for the jid row in `row_id_column`, as table `alias`.
+
+    Empty without a jid_map table; the caller then selects NULL in its place.
+    """
+    if not jid_map_exists:
+        return ""
+    return f"""LEFT JOIN jid_map {alias}_map
+                    ON {alias}_map.lid_row_id = {row_id_column}
+                LEFT JOIN jid {alias}
+                    ON {alias}._id = {alias}_map.jid_row_id"""
+
+
 def _group_member_rows(db, jid_map_exists):
     """Rows of (group JID, stored member JID, mapped member JID, is admin); None when there is no member table."""
     if _table_exists(db, "group_participant_user"):
         mapped = "COALESCE(phone_jid.raw_string, user_jid.raw_string)" if jid_map_exists else "user_jid.raw_string"
-        jid_map_join = """LEFT JOIN jid_map
-                            ON jid_map.lid_row_id = group_participant_user.user_jid_row_id
-                        LEFT JOIN jid phone_jid
-                            ON phone_jid._id = jid_map.jid_row_id""" if jid_map_exists else ""
+        jid_map_join = _phone_jid_join("group_participant_user.user_jid_row_id", "phone_jid", jid_map_exists)
         return db.execute(f"""
             SELECT group_jid.raw_string,
                 user_jid.raw_string,
@@ -663,27 +676,39 @@ def _get_reactions(db, data):
         # Check if tables exist, old schema might not have reactions or in somewhere else
         c.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='message_add_on'")
         if c.fetchone()[0] == 0:
+            logging.info("There is no message_add_on table; reaction_details is left null.")
             return
 
         logging.info("Processing reactions...", extra={"clear": True})
 
-        c.execute("""
+        # For reaction_details: the phone id behind an @lid reactor, as for a group
+        # sender, and behind an @lid chat, which the message query stores under it.
+        jid_map_exists = data.get_system("jid_map_exists")
+        sender_mapped = "sender_phone_jid.raw_string" if jid_map_exists else "NULL"
+        chat_mapped = "chat_phone_jid.raw_string" if jid_map_exists else "NULL"
+        sender_phone_join = _phone_jid_join("message_add_on.sender_jid_row_id", "sender_phone_jid", jid_map_exists)
+        chat_phone_join = _phone_jid_join("chat.jid_row_id", "chat_phone_jid", jid_map_exists)
+        c.execute(f"""
             SELECT
                 message_add_on.parent_message_row_id,
                 message_add_on_reaction.reaction,
                 message_add_on.from_me,
                 jid.raw_string as sender_jid_raw,
+                {sender_mapped} as sender_jid_mapped,
                 chat_jid.raw_string as chat_jid_raw,
+                {chat_mapped} as chat_jid_mapped,
                 message_add_on_reaction.sender_timestamp
             FROM message_add_on
                 INNER JOIN message_add_on_reaction 
                     ON message_add_on._id = message_add_on_reaction.message_add_on_row_id
                 LEFT JOIN jid 
                     ON message_add_on.sender_jid_row_id = jid._id
+                {sender_phone_join}
                 LEFT JOIN chat 
                     ON message_add_on.chat_row_id = chat._id
                 LEFT JOIN jid chat_jid 
                     ON chat.jid_row_id = chat_jid._id
+                {chat_phone_join}
         """)
     except sqlite3.OperationalError:
         logging.warning(f"Could not fetch reactions (schema might be too old or incompatible)")
@@ -691,6 +716,8 @@ def _get_reactions(db, data):
 
     rows = c.fetchall()
     total_row_number = len(rows)
+    resolver = data.get_system("identity_resolver") or IdentityResolver()
+    start_reaction_details(data)
 
     with tqdm(total=total_row_number, desc="Processing reactions", unit="reaction", leave=False) as pbar:
         for row in rows:
@@ -719,9 +746,30 @@ def _get_reactions(db, data):
                         sender_name = "Unknown"
 
                     message.reactions[sender_name] = reaction
+            # A second lookup on purpose: the block above keeps upstream's lookup for
+            # `reactions`, by the raw chat JID; reaction_details finds the chat as the
+            # message query stores it.
+            _add_reaction_detail(data, row, resolver)
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} reactions in {convert_time_unit(total_time)}")
+
+
+def _add_reaction_detail(data, row, resolver):
+    """Append one reaction row to its message's reaction_details; a withdrawn (empty) one is left out.
+
+    The chat is looked up as the message query stores it: under the phone JID
+    behind an @lid chat where jid_map has one.
+    """
+    if not row["reaction"]:
+        return
+    chat = data.get_chat(row["chat_jid_mapped"] or row["chat_jid_raw"])
+    message = chat.get_message(row["parent_message_row_id"]) if chat is not None else None
+    if message is None:
+        return
+    identity = NO_IDENTITY if row["from_me"] else resolver.resolve(
+        row["sender_jid_raw"], mapped_jid=row["sender_jid_mapped"])
+    message.reaction_details.append(reaction_entry(row["reaction"], row["from_me"], identity, row["sender_timestamp"]))
 
 
 def media(db, data, media_folder, filter_date, filter_chat, filter_empty, separate_media=True, fix_dot_files=False):

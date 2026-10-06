@@ -86,6 +86,34 @@ def member_entry(identity: Identity, active: bool, admin: bool) -> Dict[str, Any
     }
 
 
+def reaction_entry(emoji: str, from_me: bool, identity: Identity,
+                   timestamp_ms: Optional[int]) -> Dict[str, Any]:
+    """One entry of a message's `reaction_details` list.
+
+    `jid` and `lid` follow the rule of `sender_jid` and `sender_lid`; both are
+    None on a reaction by the owner of the phone. `timestamp` is in Unix
+    seconds, as the message's own `timestamp`, or None when the backup has none.
+    """
+    return {
+        "emoji": emoji,
+        "from_me": bool(from_me),
+        "jid": identity.jid,
+        "lid": identity.lid,
+        "timestamp": timestamp_ms / 1000 if timestamp_ms else None,
+    }
+
+
+def start_reaction_details(data: "ChatCollection") -> None:
+    """Give every message an empty `reaction_details` once the backup's reaction source has been read.
+
+    Until then the field is None: the backup's reactions are not known. Call
+    records, which the call pass adds later, keep None: no reaction source covers them.
+    """
+    for chat in data.values():
+        for message in chat.values():
+            message.reaction_details = []
+
+
 def merge_members(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Merge the entries of one group that share a jid, keeping first-seen order.
 
