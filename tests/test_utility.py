@@ -1,7 +1,6 @@
 import pytest
 import random
 import string
-import time
 from unittest.mock import patch, mock_open, MagicMock
 from Whatsapp_Chat_Exporter.utility import *
 
@@ -105,22 +104,11 @@ class TestSanitizeExcept:
 
 class TestDetermineDay:
     """determine_day reads the local time zone, as the HTML day separators
-    should. Each test pins it to UTC where time.tzset exists. Windows has no
-    tzset, so every timestamp is at 12:00 GMT (12:30 for the second one in
-    test_same_day): an offset from -12:00 to +11:00 leaves each date as it is.
+    should, so each expected date is read from the local zone too. Every
+    timestamp is at 12:00 GMT (12:30 for the second one in test_same_day),
+    so the two timestamps of a test fall on the same local day, or on
+    different local days, in every time zone.
     """
-
-    @pytest.fixture(autouse=True)
-    def pin_tz_to_utc(self, monkeypatch):
-        """Set the local time zone to UTC; without time.tzset, do nothing."""
-        if not hasattr(time, "tzset"):
-            yield
-            return
-        monkeypatch.setenv("TZ", "UTC")
-        time.tzset()
-        yield
-        monkeypatch.undo()
-        time.tzset()
 
     def test_same_day(self):
         timestamp1 = 1678881600  # March 15, 2023 12:00:00 GMT
@@ -130,17 +118,21 @@ class TestDetermineDay:
     def test_different_day(self):
         timestamp1 = 1678881600  # March 15, 2023 12:00:00 GMT
         timestamp2 = 1678968000  # March 16, 2023 12:00:00 GMT
-        assert determine_day(timestamp1, timestamp2) == datetime(2023, 3, 16).date()
+        assert determine_day(timestamp1, timestamp2) == datetime.fromtimestamp(timestamp2).date()
 
     def test_crossing_month(self):
         timestamp1 = 1680264000  # March 31, 2023 12:00:00 GMT
         timestamp2 = 1680350400  # April 1, 2023 12:00:00 GMT
-        assert determine_day(timestamp1, timestamp2) == datetime(2023, 4, 1).date()
+        assert determine_day(timestamp1, timestamp2) == datetime.fromtimestamp(timestamp2).date()
 
     def test_crossing_year(self):
         timestamp1 = 1704024000  # December 31, 2023 12:00:00 GMT
         timestamp2 = 1704110400  # January 1, 2024 12:00:00 GMT
-        assert determine_day(timestamp1, timestamp2) == datetime(2024, 1, 1).date()
+        assert determine_day(timestamp1, timestamp2) == datetime.fromtimestamp(timestamp2).date()
+
+    def test_local_midnight_between_two_close_timestamps(self):
+        midnight = datetime(2023, 3, 16).timestamp()  # local midnight
+        assert determine_day(midnight - 1800, midnight + 1800) == datetime(2023, 3, 16).date()
 
 
 class TestGetFileName:
