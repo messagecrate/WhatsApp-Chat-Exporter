@@ -238,6 +238,23 @@ class TestAndroidReactions:
         message = android_reactions([(None, 1, HEART)])
         assert message.reaction_details == [entry(HEART, from_me=True)]
 
+    def test_a_one_to_one_reaction_without_a_sender_row_is_by_the_other_person(self):
+        # Android leaves sender_jid_row_id at 0 in a one-to-one chat, as on message rows.
+        message = android_reactions([(0, 0, THUMBS_UP)], chat_jid=PHONE, chat_jid_row=2)
+        assert message.reaction_details == [entry(THUMBS_UP, jid=PHONE)]
+
+    def test_a_one_to_one_reaction_without_a_sender_row_in_a_lid_chat(self):
+        message = android_reactions([(0, 0, THUMBS_UP)], jid_map=[(3, 2)], chat_jid=PHONE, chat_jid_row=3)
+        assert message.reaction_details == [entry(THUMBS_UP, jid=PHONE, lid=LID)]
+
+    def test_a_one_to_one_reaction_with_a_sender_row_keeps_that_sender(self):
+        message = android_reactions([(4, 0, THUMBS_UP)], chat_jid=PHONE, chat_jid_row=2)
+        assert message.reaction_details == [entry(THUMBS_UP, jid=BEN)]
+
+    def test_a_group_reaction_without_a_sender_row_has_no_id(self):
+        message = android_reactions([(0, 0, THUMBS_UP)])
+        assert message.reaction_details == [entry(THUMBS_UP)]
+
     def test_an_empty_reaction_is_left_out_and_reactions_stays_as_upstream_has_it(self):
         message = android_reactions([(2, 0, ""), (4, 0, HEART)])
         assert message.reaction_details == [entry(HEART, jid=BEN)]

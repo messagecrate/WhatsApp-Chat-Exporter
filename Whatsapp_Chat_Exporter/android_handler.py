@@ -12,8 +12,8 @@ from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
 from Whatsapp_Chat_Exporter.identity import (
-    NO_FILTER, NO_IDENTITY, IdentityResolver, assign_members, member_entry, reaction_entry,
-    start_reaction_details
+    NO_FILTER, NO_IDENTITY, IdentityResolver, assign_members, is_one_to_one_chat, member_entry,
+    reaction_entry, start_reaction_details
 )
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
@@ -767,8 +767,16 @@ def _add_reaction_detail(data, row, resolver):
     message = chat.get_message(row["parent_message_row_id"]) if chat is not None else None
     if message is None:
         return
-    identity = NO_IDENTITY if row["from_me"] else resolver.resolve(
-        row["sender_jid_raw"], mapped_jid=row["sender_jid_mapped"])
+    if row["from_me"]:
+        identity = NO_IDENTITY
+    elif row["sender_jid_raw"]:
+        identity = resolver.resolve(row["sender_jid_raw"], mapped_jid=row["sender_jid_mapped"])
+    elif is_one_to_one_chat(row["chat_jid_raw"]):
+        # Android leaves sender_jid_row_id at 0 in a one-to-one chat, as it does on
+        # message rows, and the only other person there is the other person of the chat.
+        identity = resolver.resolve(row["chat_jid_raw"], mapped_jid=row["chat_jid_mapped"])
+    else:
+        identity = NO_IDENTITY
     message.reaction_details.append(reaction_entry(row["reaction"], row["from_me"], identity, row["sender_timestamp"]))
 
 
