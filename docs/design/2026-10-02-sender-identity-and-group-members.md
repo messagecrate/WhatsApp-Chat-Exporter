@@ -233,9 +233,13 @@ member row the message points to, and found a contact name on 981 messages.
 Most of the difference comes from the member rows of the `@broadcast` session
 below, which carry address-book names.
 
-One gap is known: on 114 messages the sender has no contact name although
-their entry in `members` has one. The name sits on the person's `@lid` row and
-the message points to their phone-id row.
+On 114 messages the sender had no contact name although their entry in
+`members` had one: the name sat on the person's `@lid` row and the message
+pointed to their phone-id row. #11 closed that gap, and the count measured for
+#14 is 0. Of the 15,570 messages with a `sender_jid`, 4,360 then have a
+contact name and a push name, 3,108 a push name only, 3,787 a contact name
+only, 4,315 neither. The step 2 row records the counts as measured on
+2026-10-02.
 
 After every step, each field that existed before the step is identical on all
 128,386 messages, `sender_jid` in step 1 being the stated exception.
