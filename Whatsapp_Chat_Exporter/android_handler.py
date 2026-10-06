@@ -523,20 +523,25 @@ def _set_group_sender(message, content, data, table_message):
     message.sender_push_name = identity.push_name
 
 
-# message_system.action_type values that are an action in a group, as
-# determine_metadata words them: renamed, added, left, icon changed, removed,
-# created, added someone, removed someone, joined by link, description changed.
-GROUP_ACTION_TYPES = frozenset({1, 4, 5, 6, 7, 11, 12, 14, 20, 27})
+# message_system.action_type values that are an action in a group. Both sets
+# follow the branches of utility.determine_metadata and change with it.
+# These begin the text with the message's sender: renamed, added, left, icon
+# changed, created, added someone, removed someone, description changed.
+GROUP_ACTION_TYPES_NAMING_SENDER = frozenset({1, 4, 5, 6, 11, 12, 14, 27})
+# These name no member: "You were removed", "Someone joined … invite link".
+GROUP_ACTION_TYPES = GROUP_ACTION_TYPES_NAMING_SENDER | {7, 20}
 
 
 def _process_metadata_message(message, content, data, table_message):
     """Process metadata message."""
     message.meta = True
     name = fallback = None
+    stored_jid = mapped_jid = None
 
     if table_message:
         if content["sender_jid_row_id"] > 0:
             _jid = content["group_sender_jid"]
+            stored_jid, mapped_jid = content["group_sender_raw_jid"], _jid
             if _jid in data:
                 name = data.get_chat(_jid).name
             if "@" in _jid:
@@ -545,6 +550,7 @@ def _process_metadata_message(message, content, data, table_message):
             name = "You"
     else:
         _jid = content["remote_resource"]
+        stored_jid = _jid
         if _jid is not None:
             if _jid in data:
                 name = data.get_chat(_jid).name
@@ -558,10 +564,8 @@ def _process_metadata_message(message, content, data, table_message):
     if isinstance(message.data, str) and "<br>" in message.data:
         message.safe = True
 
-    if (content["jid_type"] == JidType.GROUP and message.data is not None
-            and (content["is_me_joined"] == 1 or content["action_type"] in GROUP_ACTION_TYPES)):
-        message.group_action = message.data
-        message.group_action_jid = message.sender_jid
+    if content["jid_type"] == JidType.GROUP and message.data is not None:
+        _set_group_action(message, content, data, stored_jid, mapped_jid)
 
     if message.data is None:
         if content["video_call"] is not None:  # Missed call
@@ -573,6 +577,17 @@ def _process_metadata_message(message, content, data, table_message):
         elif content["data"] is None and content["thumb_image"] is None:
             message.meta = True
             message.data = None
+
+
+def _set_group_action(message, content, data, stored_jid, mapped_jid):
+    """Set group_action, the text without HTML, and group_action_jid, the member the text names."""
+    me_joined = content["is_me_joined"] == 1
+    if not me_joined and content["action_type"] not in GROUP_ACTION_TYPES:
+        return
+    message.group_action = message.data.replace("<br>", "\n")
+    if me_joined or content["action_type"] in GROUP_ACTION_TYPES_NAMING_SENDER:
+        resolver = data.get_system("identity_resolver") or IdentityResolver()
+        message.group_action_jid = resolver.resolve(stored_jid, mapped_jid=mapped_jid).jid
 
 
 def _process_regular_message(message, content, table_message):

@@ -6,7 +6,7 @@ import sqlite3
 from Whatsapp_Chat_Exporter.android_handler import _process_metadata_message, _set_group_sender
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, ChatStore, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
-from Whatsapp_Chat_Exporter.ios_handler import _group_event_type_column, process_message_data
+from Whatsapp_Chat_Exporter.ios_handler import _optional_columns, process_message_data
 from Whatsapp_Chat_Exporter.utility import Device, JidType
 
 ACTOR = "85212345678@s.whatsapp.net"
@@ -61,8 +61,21 @@ class TestIosGroupAction:
         text = json.dumps({"author": LID, "subject": None, "parent_group_name": "Parents"})
         resolver = IdentityResolver(lid_to_phone={LID: ACTOR})
         message, _ = ios(ios_row(ZTEXT=text, ZMEMBERJID=LID, ZGROUPEVENTTYPE=51), resolver=resolver)
-        assert message.group_action == "Unsupported WhatsApp internal message."
+        assert message.group_action is None
+        assert message.group_action_jid is None
+
+    def test_a_rename_by_an_lid_author_is_named_from_the_phone_id(self):
+        text = json.dumps({"author": LID, "subject": "Book club"})
+        resolver = IdentityResolver(lid_to_phone={LID: ACTOR})
+        message, _ = ios(ios_row(ZTEXT=text), named(ACTOR, "Friend"), resolver)
+        assert message.group_action == "Friend changed the group name to Book club."
         assert message.group_action_jid == ACTOR
+
+    def test_a_rename_by_the_owner_is_you_and_has_no_id(self):
+        text = json.dumps({"author": ACTOR, "subject": "Book club"})
+        message, _ = ios(ios_row(ZTEXT=text, ZISFROMME=1, ZMEMBERJID=None))
+        assert message.group_action == "You changed the group name to Book club."
+        assert message.group_action_jid is None
 
     def test_a_plain_rename_names_the_member_who_made_it(self):
         message, _ = ios(ios_row(ZTEXT="Book club", ZGROUPEVENTTYPE=1), named(ACTOR, "Friend"))
@@ -74,15 +87,26 @@ class TestIosGroupAction:
         assert message.group_action == "Newcomer joined the group"
         assert message.group_action_jid == OTHER
 
-    def test_a_join_by_an_lid_member_carries_the_phone_id(self):
+    def test_a_join_by_an_lid_member_is_named_from_the_phone_id(self):
         resolver = IdentityResolver(lid_to_phone={LID: OTHER})
-        message, _ = ios(ios_row(ZTEXT=LID, ZGROUPEVENTTYPE=2), resolver=resolver)
-        assert message.group_action == "123456789012345 joined the group"
+        message, _ = ios(ios_row(ZTEXT=LID, ZGROUPEVENTTYPE=2), named(OTHER, "Newcomer"), resolver)
+        assert message.group_action == "Newcomer joined the group"
         assert message.group_action_jid == OTHER
+
+    def test_a_join_by_an_unmapped_lid_member_keeps_the_lid(self):
+        message, _ = ios(ios_row(ZTEXT=LID, ZGROUPEVENTTYPE=2))
+        assert message.group_action == "123456789012345 joined the group"
+        assert message.group_action_jid == LID
+
+    def test_a_leave_by_an_lid_member_is_named_from_the_phone_id(self):
+        resolver = IdentityResolver(lid_to_phone={LID: ACTOR})
+        message, _ = ios(ios_row(ZGROUPEVENTTYPE=3, ZMEMBERJID=LID), resolver=resolver)
+        assert message.group_action == "85212345678 left the group"
+        assert message.group_action_jid == ACTOR
 
     def test_an_id_under_another_event_type_is_not_called_a_join(self):
         message, _ = ios(ios_row(ZTEXT=OTHER, ZGROUPEVENTTYPE=7))
-        assert message.group_action == "Unsupported WhatsApp internal message."
+        assert message.group_action is None
         assert message.group_action_jid is None
 
     def test_a_leave_names_the_member_who_left(self):
@@ -130,13 +154,13 @@ class TestGroupEventTypeColumn:
     def test_the_column_is_read_when_present(self):
         db = sqlite3.connect(":memory:")
         db.execute("CREATE TABLE ZWAMESSAGE (Z_PK INTEGER, ZGROUPEVENTTYPE INTEGER)")
-        assert _group_event_type_column(db) == "ZWAMESSAGE.ZGROUPEVENTTYPE"
+        assert _optional_columns(db, "ZWAMESSAGE", "ZGROUPEVENTTYPE") == "ZWAMESSAGE.ZGROUPEVENTTYPE"
 
     def test_a_backup_without_the_column_reads_null_and_says_so(self, caplog):
         db = sqlite3.connect(":memory:")
         db.execute("CREATE TABLE ZWAMESSAGE (Z_PK INTEGER)")
         with caplog.at_level(logging.INFO):
-            assert _group_event_type_column(db) == "NULL AS ZGROUPEVENTTYPE"
+            assert _optional_columns(db, "ZWAMESSAGE", "ZGROUPEVENTTYPE") == "NULL AS ZGROUPEVENTTYPE"
         assert "ZGROUPEVENTTYPE" in caplog.text
 
 
@@ -175,9 +199,42 @@ class TestAndroidGroupAction:
         assert message.group_action == message.data
         assert message.group_action_jid == ACTOR
 
-    def test_a_join_carries_the_member_who_joined(self):
+    def test_an_addition_carries_the_member_the_text_names(self):
         message = android(android_content(4))
         assert message.group_action == "85212345678 was added to the group"
+        assert message.group_action_jid == ACTOR
+
+    def test_a_sender_row_on_an_own_message_still_gives_the_id(self):
+        message = android(android_content(6, key_from_me=1))
+        assert message.group_action == "85212345678 changed the group icon"
+        assert message.group_action_jid == ACTOR
+
+    def test_a_description_change_is_text_without_html(self):
+        message = android(android_content(27, data="line one\nline two"))
+        assert message.group_action == "85212345678 changed the group description to:\nline one\nline two"
+        assert "<br>" in message.data
+
+    def test_a_removal_of_the_owner_names_no_member_and_has_no_id(self):
+        message = android(android_content(7))
+        assert message.group_action == "You were removed"
+        assert message.group_action_jid is None
+
+    def test_a_join_by_link_names_no_member_and_has_no_id(self):
+        message = android(android_content(20))
+        assert message.group_action.startswith("Someone joined")
+        assert message.group_action_jid is None
+
+    def test_being_added_names_the_member_who_added(self):
+        message = android(android_content(12, is_me_joined=1))
+        assert message.group_action == "You were added into the group by 85212345678"
+        assert message.group_action_jid == ACTOR
+
+    def test_the_legacy_schema_gives_the_id(self):
+        message = new_message()
+        content = android_content(5, remote_resource=ACTOR)
+        _set_group_sender(message, content, ChatCollection(), False)
+        _process_metadata_message(message, content, ChatCollection(), False)
+        assert message.group_action == "85212345678 left the group"
         assert message.group_action_jid == ACTOR
 
     def test_a_leave_carries_the_member_who_left(self):

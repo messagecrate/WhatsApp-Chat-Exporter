@@ -96,28 +96,31 @@ def _load_push_names(db):
     return {row[0]: row[1] for row in rows if row[0]}
 
 
-_MEMBER_COLUMN_FIELDS = {
-    "ZCONTACTNAME": "sender_contact_name and the members' contact_name fall back to ZFIRSTNAME, or are left empty",
-    "ZFIRSTNAME": "sender_contact_name and the members' contact_name come from ZCONTACTNAME alone",
-    "ZISACTIVE": "the members' active is left null",
-    "ZISADMIN": "the members' admin is left null",
+_OPTIONAL_COLUMN_FIELDS = {
+    ("ZWAGROUPMEMBER", "ZCONTACTNAME"):
+        "sender_contact_name and the members' contact_name fall back to ZFIRSTNAME, or are left empty",
+    ("ZWAGROUPMEMBER", "ZFIRSTNAME"):
+        "sender_contact_name and the members' contact_name come from ZCONTACTNAME alone",
+    ("ZWAGROUPMEMBER", "ZISACTIVE"): "the members' active is left null",
+    ("ZWAGROUPMEMBER", "ZISADMIN"): "the members' admin is left null",
+    ("ZWAMESSAGE", "ZGROUPEVENTTYPE"): "group_action is set only from the text of an action",
 }
 
 
-def _member_columns(db, *columns, quiet=()):
-    """Select the named ZWAGROUPMEMBER columns, or NULL for one the backup lacks.
+def _optional_columns(db, table, *columns, quiet=()):
+    """Select the named columns of `table`, or NULL for one the backup lacks.
 
     One log line per missing column; `quiet` names columns whose absence an
     earlier query of the same run already logged.
     """
-    present = {row[1] for row in db.execute("PRAGMA table_info(ZWAGROUPMEMBER)").fetchall()}
+    present = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
     terms = []
     for column in columns:
         if column in present:
-            terms.append(f"ZWAGROUPMEMBER.{column}")
+            terms.append(f"{table}.{column}")
             continue
         if column not in quiet:
-            logging.info(f"ZWAGROUPMEMBER has no {column} column; {_MEMBER_COLUMN_FIELDS[column]}.")
+            logging.info(f"{table} has no {column} column; {_OPTIONAL_COLUMN_FIELDS[(table, column)]}.")
         terms.append(f"NULL AS {column}")
     return ", ".join(terms)
 
@@ -132,7 +135,7 @@ def _load_member_contact_names(db, lid_to_phone):
     """
     try:
         rows = db.execute(
-            f"SELECT ZMEMBERJID, {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME')}"
+            f"SELECT ZMEMBERJID, {_optional_columns(db, 'ZWAGROUPMEMBER', 'ZCONTACTNAME', 'ZFIRSTNAME')}"
             " FROM ZWAGROUPMEMBER ORDER BY Z_PK"
         ).fetchall()
     except sqlite3.Error as e:
@@ -168,7 +171,8 @@ def _add_group_members(db, data, identity_resolver, filter_chat=NO_FILTER):
         rows = db.execute(f"""
             SELECT ZWACHATSESSION.ZCONTACTJID,
                 ZWAGROUPMEMBER.ZMEMBERJID,
-                {_member_columns(db, 'ZCONTACTNAME', 'ZFIRSTNAME', 'ZISACTIVE', 'ZISADMIN', quiet=('ZCONTACTNAME', 'ZFIRSTNAME'))}
+                {_optional_columns(db, 'ZWAGROUPMEMBER', 'ZCONTACTNAME', 'ZFIRSTNAME', 'ZISACTIVE', 'ZISADMIN',
+                                    quiet=('ZCONTACTNAME', 'ZFIRSTNAME'))}
             FROM ZWAGROUPMEMBER
                 INNER JOIN ZWACHATSESSION
                     ON ZWAGROUPMEMBER.ZCHATSESSION = ZWACHATSESSION.Z_PK
@@ -282,7 +286,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     logging.info(f"Processing messages...(0/{total_row_number})", extra={"clear": True})
 
     # Fetch messages
-    group_event_type = _group_event_type_column(db)
+    group_event_type = _optional_columns(db, "ZWAMESSAGE", "ZGROUPEVENTTYPE")
     messages_query = f"""
         SELECT ZCONTACTJID,
             ZWAMESSAGE.Z_PK,
@@ -352,15 +356,6 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
     _add_group_members(db, data, identity_resolver, filter_chat)
 
 
-def _group_event_type_column(db):
-    """ZWAMESSAGE.ZGROUPEVENTTYPE, or NULL when the backup lacks the column."""
-    present = {row[1] for row in db.execute("PRAGMA table_info(ZWAMESSAGE)").fetchall()}
-    if "ZGROUPEVENTTYPE" in present:
-        return "ZWAMESSAGE.ZGROUPEVENTTYPE"
-    logging.info("ZWAMESSAGE has no ZGROUPEVENTTYPE column; group_action is set only from the text of an action.")
-    return "NULL AS ZGROUPEVENTTYPE"
-
-
 def message_from_row(content, timezone_offset):
     """A Message for a ZWAMESSAGE row. key_id is the first 17 characters of the stanza id,
     as upstream writes it. full_key_id is the whole stanza id."""
@@ -382,6 +377,7 @@ def message_from_row(content, timezone_offset):
 def process_message_data(message, content, is_group_message, data, message_map, no_reply,
                          identity_resolver=None):
     """Process and set message data from content row."""
+    identity_resolver = identity_resolver or IdentityResolver()
     # Handle group sender info
     if is_group_message and content["ZISFROMME"] == 0:
         name = None
@@ -395,7 +391,7 @@ def process_message_data(message, content, is_group_message, data, message_map, 
         else:
             fallback = None
         message.sender = name or fallback
-        identity = (identity_resolver or IdentityResolver()).resolve(content["ZMEMBERJID"])
+        identity = identity_resolver.resolve(content["ZMEMBERJID"])
         message.sender_jid = identity.jid
         message.sender_lid = identity.lid
         message.sender_contact_name = identity.contact_name
@@ -429,36 +425,39 @@ def process_message_data(message, content, is_group_message, data, message_map, 
     return False  # Message is valid
 
 
-UNSUPPORTED_GROUP_ACTION = "Unsupported WhatsApp internal message."
-
-# ZGROUPEVENTTYPE values whose meaning is known. Other values are written as
-# UNSUPPORTED_GROUP_ACTION when the row has a text, and left None when it has none.
+# ZGROUPEVENTTYPE values whose meaning is known, as wiggin15/whatsapp_history
+# reads them. No source states any other value, so an action under another value
+# has no group_action: the fork does not guess.
 GROUP_EVENT_RENAMED = 1
 GROUP_EVENT_JOINED = 2
 GROUP_EVENT_LEFT = 3
 GROUP_EVENT_PICTURE_CHANGED = 4
 
 
-def _member_display_name(jid, data):
-    """A member's name as `sender` gives it: the name of a chat with them, else the digits of the id."""
-    if not jid:
-        return None
-    name = data.get_chat(jid).name if jid in data else None
-    fallback = jid.split('@')[0] if "@" in jid else None
-    return name or fallback
+def _member_display_name(identity, data):
+    """A member's name: the name of a chat with them, else the digits of their resolved id.
+
+    The resolved id is the phone id wherever the backup maps an @lid id, so the
+    digits of an @lid id appear only when the backup has no mapping for it.
+    """
+    for jid in (identity.jid, identity.lid):
+        if jid and jid in data and data.get_chat(jid).name:
+            return data.get_chat(jid).name
+    return identity.jid.split('@')[0] if identity.jid else None
 
 
-def _parse_group_action(content, data, actor_name):
-    """The text of a group action and the id of the member who acted, as the row states them.
+def _parse_group_action(content, data, identity_resolver):
+    """The text of a group action and the resolved id of the member it names.
 
-    `actor_name` names the member the row points to ("You" for the owner). The id is
-    the one the backup stores; the caller resolves it. Either value is None where the
-    row does not say.
+    The actor is the member the row points to, "You" when the owner acted.
+    Either value is None where the row does not say.
     """
     ztext = content["ZTEXT"]
     event_type = content["ZGROUPEVENTTYPE"]
-    actor_jid = content["ZMEMBERJID"] if not content["ZISFROMME"] else None
-    actor = actor_name or "Someone"
+    from_me = bool(content["ZISFROMME"])
+    actor_identity = identity_resolver.resolve(None if from_me else content["ZMEMBERJID"])
+    actor_jid = actor_identity.jid
+    actor = "You" if from_me else _member_display_name(actor_identity, data) or "Someone"
 
     if ztext is None:
         if event_type == GROUP_EVENT_LEFT:
@@ -469,45 +468,45 @@ def _parse_group_action(content, data, actor_name):
 
     if ztext.endswith("@lid") or ztext.endswith("@s.whatsapp.net"):
         if event_type == GROUP_EVENT_JOINED:
-            return f"{_member_display_name(ztext, data)} joined the group", ztext
-        return UNSUPPORTED_GROUP_ACTION, None
+            member = identity_resolver.resolve(ztext)
+            return f"{_member_display_name(member, data)} joined the group", member.jid
+        return None, None
 
     if ztext.startswith("{") and ztext.endswith("}"):
         try:
             metadata = json.loads(ztext)
         except json.JSONDecodeError:
-            return UNSUPPORTED_GROUP_ACTION, None
-        if not isinstance(metadata, dict):
-            return UNSUPPORTED_GROUP_ACTION, None
-        # A stored author can be null; such an action has no named author.
+            return None, None
+        subject = metadata.get("subject") if isinstance(metadata, dict) else None
+        if not isinstance(subject, str) or not subject:
+            return None, None
+        if from_me:
+            return f"You changed the group name to {subject}.", None
+        # A stored author can be null; such a rename has no named author.
         author = metadata.get("author")
-        author = author if isinstance(author, str) and author else None
-        subject = metadata.get("subject")
-        if isinstance(subject, str) and subject:
-            entity = _member_display_name(author, data) or "Someone"
-            return f"{entity} changed the group name to {subject}.", author
-        return UNSUPPORTED_GROUP_ACTION, author
+        if not isinstance(author, str) or not author:
+            return f"Someone changed the group name to {subject}.", None
+        identity = identity_resolver.resolve(author)
+        return f"{_member_display_name(identity, data)} changed the group name to {subject}.", identity.jid
 
     if ztext == "admin_add":
+        # Upstream's reading of this text; no row on the measured backup holds it.
         return "The administrator has restricted participant additions to admins only.", None
 
     if event_type == GROUP_EVENT_RENAMED:
         return f"{actor} changed the group name to {ztext}.", actor_jid
-    return UNSUPPORTED_GROUP_ACTION, None
+    return None, None
 
 
-def process_metadata_message(message, content, is_group_message, data, identity_resolver=None):
+def process_metadata_message(message, content, is_group_message, data, identity_resolver):
     """Process metadata messages (action_type 6).
 
-    `data` is what the HTML shows and stays as upstream's main writes it. The
-    group action's own text goes to `group_action`, and the member who acted to
-    `group_action_jid`.
+    `message.data` is what the HTML shows and stays as upstream's main writes it.
+    The group action's own text goes to `group_action`, and the id of the member
+    it names to `group_action_jid`.
     """
     if is_group_message:
-        actor_name = "You" if content["ZISFROMME"] else message.sender
-        text, actor_jid = _parse_group_action(content, data, actor_name)
-        message.group_action = text
-        message.group_action_jid = (identity_resolver or IdentityResolver()).resolve(actor_jid).jid
+        message.group_action, message.group_action_jid = _parse_group_action(content, data, identity_resolver)
         # Group
         if content["ZTEXT"] is not None:
             # Changed name
