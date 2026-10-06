@@ -199,7 +199,7 @@ of the backup, records counts only, and deletes its scratch files.
 | Step | Must hold on the backup |
 |---|---|
 | 1 | 1,427 received group messages move from an `@lid` id to a phone id in `sender_jid`, and carry the `@lid` id in `sender_lid`. No `sender_jid` is an `@lid` id. 15,570 messages have a `sender_jid`, as before. |
-| 2 | Of the 15,570 messages with a `sender_jid`, 7,468 have a `sender_push_name` and 8,022 have a `sender_contact_name` (981 in the first version, which read only the member row the message points to; 8,147 after #11, as "Measured results" says). Of the 5,708 messages whose `sender` is digits, at least 2,696 have a `sender_push_name`. The 2,054 messages with no member row have neither name. |
+| 2 | Of the 15,570 messages with a `sender_jid`, 7,468 have a `sender_push_name` and 8,022 have a `sender_contact_name` (981 in the first version, which read only the member row the message points to). The code after #11 gives 8,147, as "Measured results" says. Of the 5,708 messages whose `sender` is digits, at least 2,696 have a `sender_push_name`. The 2,054 messages with no member row have neither name. |
 | 3 | The 639 member rows of the 42 groups become one entry per person in each group; the check script computes the expected entries from the database. Every `sender_jid` in a group is the `jid` of an entry in that group's `members`. |
 
 **Nothing existing changes.** For each step, every field that existed before
@@ -237,13 +237,12 @@ On 114 messages in step 2 the sender had no contact name although their entry
 in `members` had one. The name sat on the person's `@lid` row. The message
 pointed to their phone-id row. #11 closed that gap.
 
-Measured again on `main` at 2f5a6e4, after all of #11, for #14: 0 messages lack
-a contact name that their `members` entry has. Of the 15,570 messages with a
-`sender_jid`, 4,360 have a contact name and a push name, 3,108 a push name
-only, 3,787 a contact name only, 4,315 neither. Contact names went from 8,022
-to 8,147: 114 from the closed gap, 11 from other changes merged between the
-two runs. Push names stay at 7,468. The step 2 row keeps the counts of
-2026-10-02.
+Measured again on `main` at 2f5a6e4, after all of #11, for pull request #14,
+which tests that gap: 0 messages lack a contact name that their `members`
+entry has. Of the 15,570 messages with a `sender_jid`, 4,360 have a contact
+name and a push name, 3,108 a push name only, 3,787 a contact name only, 4,315
+neither. Contact names went from 8,022 to 8,147. Push names stay at 7,468. The
+step 2 row keeps the counts of 2026-10-02.
 
 After every step, each field that existed before the step is identical on all
 128,386 messages, `sender_jid` in step 1 being the stated exception.
