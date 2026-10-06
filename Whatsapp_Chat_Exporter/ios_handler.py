@@ -319,13 +319,14 @@ def _add_reactions(db, data, identity_resolver):
         reactions = reactions_from_receipt_info(receipt_info)
         if reactions is None:
             unreadable += 1
+            message.reaction_details = None  # Not known: the record could not be read
             continue
         message.reaction_details = [
             reaction_entry(r.emoji, r.from_me, identity_resolver.resolve(r.jid), r.timestamp_ms)
             for r in reactions
         ]
     if unreadable:
-        logging.info(f"{unreadable} receipt records could not be decoded; their messages get an empty reaction_details.")
+        logging.info(f"{unreadable} receipt records could not be decoded; reaction_details is left null on their messages.")
 
 
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):

@@ -131,7 +131,7 @@ class TestIosReactions:
     def test_a_malformed_blob_gives_no_reaction(self):
         good = receipt_info(other_reaction(PHONE, THUMBS_UP))
         broken, good_after = ios_reactions(good[:-3], good)
-        assert broken.reaction_details == []
+        assert broken.reaction_details is None
         assert good_after.reaction_details == [entry(THUMBS_UP, jid=PHONE)]
 
     def test_reactions_stays_as_upstream_has_it(self):
@@ -154,9 +154,10 @@ class TestIosReactions:
         assert data.get_chat(GROUP).get_message(1).reaction_details is None
         assert "reaction_details is left null" in caplog.text
 
-    def test_an_undecodable_blob_is_logged(self, caplog):
+    def test_an_undecodable_blob_is_logged_and_left_null(self, caplog):
         with caplog.at_level(logging.INFO):
-            ios_reactions(b"\xff\xff\xff")
+            [message] = ios_reactions(b"\xff\xff\xff")
+        assert message.reaction_details is None
         assert "1 receipt records could not be decoded" in caplog.text
 
 

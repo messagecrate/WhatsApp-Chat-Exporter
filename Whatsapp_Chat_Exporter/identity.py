@@ -106,7 +106,8 @@ def reaction_entry(emoji: str, from_me: bool, identity: Identity,
 def start_reaction_details(data: "ChatCollection") -> None:
     """Give every message an empty `reaction_details` once the backup's reaction source has been read.
 
-    Until then the field is None: the backup's reactions are not known.
+    Until then the field is None: the backup's reactions are not known. Call
+    records, which the call pass adds later, keep None: no reaction source covers them.
     """
     for chat in data.values():
         for message in chat.values():

@@ -699,6 +699,9 @@ def _get_reactions(db, data):
                         sender_name = "Unknown"
 
                     message.reactions[sender_name] = reaction
+            # A second lookup on purpose: the block above keeps upstream's lookup for
+            # `reactions`, by the raw chat JID; reaction_details finds the chat as the
+            # message query stores it.
             _add_reaction_detail(data, row, resolver)
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
