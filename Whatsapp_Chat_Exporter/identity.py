@@ -20,6 +20,14 @@ class Identity(NamedTuple):
 NO_IDENTITY = Identity(None, None, None, None)
 
 
+def is_one_to_one_chat(chat_jid: Optional[str]) -> bool:
+    """Whether a chat JID names one other person: a phone JID or an @lid JID.
+
+    A group (@g.us), a broadcast list, a status feed and a newsletter are not.
+    """
+    return bool(chat_jid) and (chat_jid.endswith(PHONE_SUFFIX) or chat_jid.endswith(LID_SUFFIX))
+
+
 def phone_jid(number: Optional[str]) -> Optional[str]:
     """Build a phone JID from a phone number, keeping only its digits."""
     digits = "".join(char for char in (number or "") if char.isdigit())

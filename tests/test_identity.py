@@ -1,7 +1,8 @@
 
 from Whatsapp_Chat_Exporter.data_model import ChatStore
 from Whatsapp_Chat_Exporter.identity import (
-    Identity, IdentityResolver, group_is_exported, member_entry, merge_members, phone_jid
+    Identity, IdentityResolver, group_is_exported, is_one_to_one_chat, member_entry, merge_members,
+    phone_jid
 )
 from Whatsapp_Chat_Exporter.utility import Device
 
@@ -125,6 +126,17 @@ class TestGroupIsExported:
         assert group_is_exported(self.GROUP, False, (["85212345678"], None))
         assert group_is_exported(self.GROUP, True, (["99999"], None))
         assert not group_is_exported(self.GROUP, False, (["99999"], None))
+
+
+class TestIsOneToOneChat:
+    def test_a_phone_or_lid_chat_is_one_to_one(self):
+        assert is_one_to_one_chat(PHONE)
+        assert is_one_to_one_chat(LID)
+
+    def test_a_group_broadcast_status_newsletter_or_no_chat_is_not(self):
+        for jid in ("85212345678-1463926641@g.us", "1234567890@broadcast", "status@broadcast",
+                    "120363000000000000@newsletter", None, ""):
+            assert not is_one_to_one_chat(jid)
 
 
 class TestUnknownFlags:
