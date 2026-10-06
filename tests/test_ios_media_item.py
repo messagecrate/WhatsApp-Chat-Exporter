@@ -1,28 +1,32 @@
-"""Media lookup in the iPhone handler, for the two shapes ZMEDIALOCALPATH takes.
+"""Media lookup in the iPhone handler, for both shapes of ZMEDIALOCALPATH.
 
 A real iPhone backup stores ZMEDIALOCALPATH both as "Media/..." and as
-"/Media/..." (with a leading slash). Both name a file under Message/ in the
-app group directory, and both must be found.
+"/Media/..." (with a leading slash). Both name a file under Message/ in
+the app group directory. These tests guard the lookup as it is on main:
+they fail if a change to how the path is built (for example stripping
+or rejoining the leading slash so that "Message/" is lost) stops either
+shape from being found, or changes the "data" value the export writes.
 """
-import os
 from mimetypes import MimeTypes
 
 import pytest
 
-from Whatsapp_Chat_Exporter.data_model import ChatCollection, ChatStore, Message
+from Whatsapp_Chat_Exporter.data_model import (
+    ChatCollection, ChatStore, Message)
 from Whatsapp_Chat_Exporter.ios_handler import process_media_item
 from Whatsapp_Chat_Exporter.utility import Device
 
 MEDIA_FOLDER = "AppDomainGroup-group.net.whatsapp.WhatsApp.shared"
 CHAT = "1@s.whatsapp.net"
-RELATIVE = "Media/1@s.whatsapp.net/a/b/photo.jpg"
+LOCAL_PATH = "Media/1@s.whatsapp.net/a/b/photo.jpg"
 
 
 def run_media_item(local_path):
     data = ChatCollection()
     chat = ChatStore(Device.IOS)
     data.add_chat(CHAT, chat)
-    message = Message(from_me=0, timestamp=0, time=0, key_id="k", message_type=1)
+    message = Message(
+        from_me=0, timestamp=0, time=0, key_id="k", message_type=1)
     chat.add_message(7, message)
     content = {
         "ZCONTACTJID": CHAT,
@@ -31,29 +35,34 @@ def run_media_item(local_path):
         "ZVCARDSTRING": None,
         "ZTITLE": None,
     }
-    process_media_item(content, data, MEDIA_FOLDER, MimeTypes(), separate_media=False)
+    process_media_item(
+        content, data, MEDIA_FOLDER, MimeTypes(), separate_media=False)
     return message
 
 
 @pytest.fixture
-def media_file(tmp_path, monkeypatch):
+def app_group(tmp_path, monkeypatch):
+    """An app group directory holding one file, at Message/LOCAL_PATH."""
     monkeypatch.chdir(tmp_path)
-    path = tmp_path / MEDIA_FOLDER / "Message" / RELATIVE
+    path = tmp_path / MEDIA_FOLDER / "Message" / LOCAL_PATH
     path.parent.mkdir(parents=True)
     path.write_bytes(b"jpeg")
-    return path
 
 
-@pytest.mark.parametrize("local_path", [RELATIVE, "/" + RELATIVE])
-def test_media_found_for_relative_and_leading_slash_paths(media_file, local_path):
+@pytest.mark.parametrize("local_path, data", [
+    (LOCAL_PATH, "Message/" + LOCAL_PATH),
+    # The leading slash is kept as a double slash in "data" today.
+    ("/" + LOCAL_PATH, "Message//" + LOCAL_PATH),
+])
+def test_media_found_for_both_path_shapes(app_group, local_path, data):
     message = run_media_item(local_path)
 
     assert message.meta is False
     assert message.mime == "image/jpeg"
-    assert os.path.samefile(os.path.join(MEDIA_FOLDER, message.data), media_file)
+    assert message.data == data
 
 
-def test_media_absent_from_the_backup_is_marked_missing(media_file):
+def test_media_absent_from_the_backup_is_marked_missing(app_group):
     message = run_media_item("Media/1@s.whatsapp.net/a/b/other.jpg")
 
     assert message.meta is True
