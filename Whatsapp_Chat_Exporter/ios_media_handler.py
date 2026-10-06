@@ -224,8 +224,10 @@ class BackupExtractor:
 
                     if flags == 2:  # Directory
                         try:
-                            os.mkdir(destination)
+                            os.makedirs(destination, exist_ok=True)
                         except FileExistsError:
+                            # A file is at this path: leave it, as
+                            # os.mkdir did.
                             pass
                     elif flags == 1:  # File
                         shutil.copyfile(os.path.join(self.base_dir, folder, hashes), destination)
