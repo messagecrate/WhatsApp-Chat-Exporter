@@ -11,7 +11,9 @@ from markupsafe import escape as htmle
 from base64 import b64decode, b64encode
 from datetime import datetime
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry
+from Whatsapp_Chat_Exporter.identity import (
+    NO_FILTER, NO_IDENTITY, IdentityResolver, assign_members, member_entry, reaction_entry
+)
 from Whatsapp_Chat_Exporter.utility import MAX_SIZE, ROW_SIZE, JidType, Device, get_jid_map_join
 from Whatsapp_Chat_Exporter.utility import rendering, get_file_name, setup_template, get_cond_for_empty
 from Whatsapp_Chat_Exporter.utility import get_status_location, convert_time_unit, get_jid_map_selection
@@ -620,12 +622,23 @@ def _get_reactions(db, data):
 
         logging.info("Processing reactions...", extra={"clear": True})
 
-        c.execute("""
+        # The phone id behind an @lid reactor, for reaction_details, as for a group sender.
+        if data.get_system("jid_map_exists"):
+            mapped_selection = "phone_jid.raw_string as sender_jid_mapped"
+            jid_map_join = """LEFT JOIN jid_map
+                    ON jid_map.lid_row_id = message_add_on.sender_jid_row_id
+                LEFT JOIN jid phone_jid
+                    ON phone_jid._id = jid_map.jid_row_id"""
+        else:
+            mapped_selection = "NULL as sender_jid_mapped"
+            jid_map_join = ""
+        c.execute(f"""
             SELECT
                 message_add_on.parent_message_row_id,
                 message_add_on_reaction.reaction,
                 message_add_on.from_me,
                 jid.raw_string as sender_jid_raw,
+                {mapped_selection},
                 chat_jid.raw_string as chat_jid_raw,
                 message_add_on_reaction.sender_timestamp
             FROM message_add_on
@@ -633,6 +646,7 @@ def _get_reactions(db, data):
                     ON message_add_on._id = message_add_on_reaction.message_add_on_row_id
                 LEFT JOIN jid 
                     ON message_add_on.sender_jid_row_id = jid._id
+                {jid_map_join}
                 LEFT JOIN chat 
                     ON message_add_on.chat_row_id = chat._id
                 LEFT JOIN jid chat_jid 
@@ -644,6 +658,7 @@ def _get_reactions(db, data):
 
     rows = c.fetchall()
     total_row_number = len(rows)
+    resolver = data.get_system("identity_resolver") or IdentityResolver()
 
     with tqdm(total=total_row_number, desc="Processing reactions", unit="reaction", leave=False) as pbar:
         for row in rows:
@@ -672,6 +687,12 @@ def _get_reactions(db, data):
                         sender_name = "Unknown"
 
                     message.reactions[sender_name] = reaction
+
+                    if reaction:
+                        identity = NO_IDENTITY if row["from_me"] else resolver.resolve(
+                            row["sender_jid_raw"], mapped_jid=row["sender_jid_mapped"])
+                        message.reaction_details.append(
+                            reaction_entry(reaction, row["from_me"], identity, row["sender_timestamp"]))
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} reactions in {convert_time_unit(total_time)}")

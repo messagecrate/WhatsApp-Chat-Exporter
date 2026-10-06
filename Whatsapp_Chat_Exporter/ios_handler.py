@@ -12,7 +12,9 @@ from pathlib import Path
 from mimetypes import MimeTypes
 from markupsafe import escape as htmle
 from Whatsapp_Chat_Exporter.data_model import ChatStore, Message
-from Whatsapp_Chat_Exporter.identity import NO_FILTER, IdentityResolver, assign_members, member_entry, phone_jid
+from Whatsapp_Chat_Exporter.identity import (
+    NO_FILTER, IdentityResolver, assign_members, member_entry, phone_jid, reaction_entry
+)
 from Whatsapp_Chat_Exporter.utility import APPLE_TIME, get_chat_condition, Device
 from Whatsapp_Chat_Exporter.utility import bytes_to_readable, convert_time_unit, safe_name
 
@@ -190,6 +192,124 @@ def _add_group_members(db, data, identity_resolver, filter_chat=NO_FILTER):
     assign_members(data, entries, filter_chat)
 
 
+def _protobuf_fields(blob):
+    """Yield (field number, wire type, value) for each field of a protobuf message.
+
+    A varint is an int; a length-delimited field is bytes. Raises ValueError
+    when the bytes are not a protobuf message.
+    """
+    def varint(position):
+        result = shift = 0
+        while True:
+            if position >= len(blob) or shift > 63:
+                raise ValueError("bad varint")
+            byte = blob[position]
+            position += 1
+            result |= (byte & 0x7F) << shift
+            shift += 7
+            if not byte & 0x80:
+                return result, position
+
+    position = 0
+    while position < len(blob):
+        key, position = varint(position)
+        field, wire_type = key >> 3, key & 7
+        if field == 0:
+            raise ValueError("field number 0")
+        if wire_type == 0:
+            value, position = varint(position)
+        elif wire_type in (1, 2, 5):
+            if wire_type == 2:
+                size, position = varint(position)
+            else:
+                size = 8 if wire_type == 1 else 4
+            value = bytes(blob[position:position + size])
+            position += size
+            if position > len(blob):
+                raise ValueError("field runs past the end")
+        else:
+            raise ValueError(f"wire type {wire_type}")
+        yield field, wire_type, value
+
+
+def _protobuf_message(blob):
+    """The fields of a protobuf message as a dict, the last value of a field winning."""
+    return {field: (wire_type, value) for field, wire_type, value in _protobuf_fields(blob)}
+
+
+def _protobuf_value(fields, field, wire_type):
+    """The value of `field` when it has the expected wire type, else None."""
+    found = fields.get(field)
+    return found[1] if found is not None and found[0] == wire_type else None
+
+
+def reactions_from_receipt_info(blob):
+    """Read the reactions in a ZWAMESSAGEINFO.ZRECEIPTINFO blob.
+
+    The blob is a protobuf message. Field 7 holds the reactions: each 7.1 is a
+    reaction by someone else (1 the reaction's id, 2 the reactor's JID,
+    3 the emoji, 4 the time in Unix milliseconds); each 7.2 is a reaction by the
+    owner of the phone (1 the reaction's id, 2 the emoji, 3 the time). An entry
+    with no emoji is a withdrawn reaction and is left out.
+
+    Returns a list of (from_me, stored JID or None, emoji, time in milliseconds
+    or None). Empty when the blob holds no reaction or cannot be read.
+    """
+    reactions = []
+    try:
+        for field, wire_type, value in _protobuf_fields(blob or b""):
+            if field != 7 or wire_type != 2:
+                continue
+            for entry_field, entry_wire_type, entry in _protobuf_fields(value):
+                if entry_wire_type != 2 or entry_field not in (1, 2):
+                    continue
+                fields = _protobuf_message(entry)
+                if entry_field == 1:
+                    jid = _protobuf_value(fields, 2, 2)
+                    emoji = _protobuf_value(fields, 3, 2)
+                    timestamp = _protobuf_value(fields, 4, 0)
+                    if not jid:
+                        continue
+                    jid = jid.decode("utf-8")
+                else:
+                    jid = None
+                    emoji = _protobuf_value(fields, 2, 2)
+                    timestamp = _protobuf_value(fields, 3, 0)
+                if emoji:
+                    reactions.append((entry_field == 2, jid, emoji.decode("utf-8"), timestamp))
+    except (ValueError, UnicodeDecodeError):
+        return []
+    return reactions
+
+
+def _add_reactions(db, data, identity_resolver):
+    """Set `reaction_details` on every exported message whose receipt info holds a reaction."""
+    try:
+        rows = db.execute("""
+            SELECT ZWACHATSESSION.ZCONTACTJID,
+                ZWAMESSAGE.Z_PK,
+                ZWAMESSAGEINFO.ZRECEIPTINFO
+            FROM ZWAMESSAGE
+                INNER JOIN ZWAMESSAGEINFO
+                    ON ZWAMESSAGE.ZMESSAGEINFO = ZWAMESSAGEINFO.Z_PK
+                INNER JOIN ZWACHATSESSION
+                    ON ZWAMESSAGE.ZCHATSESSION = ZWACHATSESSION.Z_PK
+            WHERE ZWAMESSAGEINFO.ZRECEIPTINFO IS NOT NULL
+        """).fetchall()
+    except sqlite3.Error as e:
+        logging.info(f"Reactions could not be read ({e}); reaction_details is left empty.")
+        return
+    for chat_jid, message_pk, receipt_info in rows:
+        chat = data.get_chat(chat_jid)
+        message = chat.get_message(message_pk) if chat is not None else None
+        if message is None:
+            continue
+        message.reaction_details = [
+            reaction_entry(emoji, from_me, identity_resolver.resolve(jid), timestamp)
+            for from_me, jid, emoji, timestamp in reactions_from_receipt_info(receipt_info)
+        ]
+
+
 def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, filter_empty, no_reply):
     """Process WhatsApp messages and contacts from the database."""
     c = db.cursor()
@@ -346,6 +466,7 @@ def messages(db, data, media_folder, timezone_offset, filter_date, filter_chat, 
             pbar.update(1)
         total_time = pbar.format_dict['elapsed']
     logging.info(f"Processed {total_row_number} messages in {convert_time_unit(total_time)}")
+    _add_reactions(db, data, identity_resolver)
     _add_group_members(db, data, identity_resolver, filter_chat)
 
 
