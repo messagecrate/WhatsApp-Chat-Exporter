@@ -3,11 +3,13 @@ import json
 import logging
 import sqlite3
 
-from Whatsapp_Chat_Exporter.android_handler import _process_metadata_message, _set_group_sender
+from Whatsapp_Chat_Exporter.android_handler import (
+    GROUP_ACTION_TYPES_NAMING_SENDER, _process_metadata_message, _set_group_sender
+)
 from Whatsapp_Chat_Exporter.data_model import ChatCollection, ChatStore, Message
 from Whatsapp_Chat_Exporter.identity import IdentityResolver
 from Whatsapp_Chat_Exporter.ios_handler import _optional_columns, process_message_data
-from Whatsapp_Chat_Exporter.utility import Device, JidType
+from Whatsapp_Chat_Exporter.utility import Device, JidType, determine_metadata
 
 ACTOR = "85212345678@s.whatsapp.net"
 OTHER = "85287654321@s.whatsapp.net"
@@ -213,6 +215,27 @@ class TestAndroidGroupAction:
         message = android(android_content(27, data="line one\nline two"))
         assert message.group_action == "85212345678 changed the group description to:\nline one\nline two"
         assert "<br>" in message.data
+
+    def test_a_literal_br_in_a_description_is_kept(self):
+        message = android(android_content(27, data="a<br>b"))
+        assert message.group_action == "85212345678 changed the group description to:\na<br>b"
+
+    def test_a_cleared_description_has_no_group_action(self):
+        message = android(android_content(27, data=None))
+        assert message.group_action is None
+        assert message.group_action_jid is None
+
+    def test_a_rename_without_a_name_has_no_group_action(self):
+        message = android(android_content(1, data=None))
+        assert message.group_action is None
+
+    def test_the_types_naming_the_sender_match_determine_metadata(self):
+        # 9, "created a broadcast channel", names the sender but is not a group action.
+        for action_type in set(range(100)) - {9}:
+            content = android_content(action_type, data="x", old_jid=ACTOR, new_jid=OTHER)
+            text = determine_metadata(content, "NAME")
+            names_sender = isinstance(text, str) and text.startswith("NAME ")
+            assert names_sender == (action_type in GROUP_ACTION_TYPES_NAMING_SENDER), action_type
 
     def test_a_removal_of_the_owner_names_no_member_and_has_no_id(self):
         message = android(android_content(7))

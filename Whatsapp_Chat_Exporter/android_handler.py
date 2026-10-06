@@ -494,29 +494,37 @@ def _process_binary_message(message, content):
     message.safe = message.meta = True
 
 
-def _set_group_sender(message, content, data, table_message):
-    """Set sender name and identity for group messages."""
-    name = fallback = None
+def _row_sender_identity(content, data, table_message):
+    """The resolved identity of the member a message row names as its sender, or NO_IDENTITY."""
     stored_jid = mapped_jid = None
     if table_message:
         if content["sender_jid_row_id"] > 0:
+            stored_jid, mapped_jid = content["group_sender_raw_jid"], content["group_sender_jid"]
+    else:
+        stored_jid = content["remote_resource"]
+    resolver = data.get_system("identity_resolver") or IdentityResolver()
+    return resolver.resolve(stored_jid, mapped_jid=mapped_jid)
+
+
+def _set_group_sender(message, content, data, table_message):
+    """Set sender name and identity for group messages."""
+    name = fallback = None
+    if table_message:
+        if content["sender_jid_row_id"] > 0:
             mapped_jid = content["group_sender_jid"]
-            stored_jid = content["group_sender_raw_jid"]
             if mapped_jid in data:
                 name = data.get_chat(mapped_jid).name
             if "@" in mapped_jid:
                 fallback = mapped_jid.split('@')[0]
     else:
         if content["remote_resource"] is not None:
-            stored_jid = content["remote_resource"]
             if content["remote_resource"] in data:
                 name = data.get_chat(content["remote_resource"]).name
             if "@" in content["remote_resource"]:
                 fallback = content["remote_resource"].split('@')[0]
 
     message.sender = name or fallback
-    resolver = data.get_system("identity_resolver") or IdentityResolver()
-    identity = resolver.resolve(stored_jid, mapped_jid=mapped_jid)
+    identity = _row_sender_identity(content, data, table_message)
     message.sender_jid = identity.jid
     message.sender_lid = identity.lid
     message.sender_contact_name = identity.contact_name
@@ -524,7 +532,8 @@ def _set_group_sender(message, content, data, table_message):
 
 
 # message_system.action_type values that are an action in a group. Both sets
-# follow the branches of utility.determine_metadata and change with it.
+# follow the branches of utility.determine_metadata and change with it;
+# tests/test_group_action.py checks the first against it.
 # These begin the text with the message's sender: renamed, added, left, icon
 # changed, created, added someone, removed someone, description changed.
 GROUP_ACTION_TYPES_NAMING_SENDER = frozenset({1, 4, 5, 6, 11, 12, 14, 27})
@@ -536,12 +545,10 @@ def _process_metadata_message(message, content, data, table_message):
     """Process metadata message."""
     message.meta = True
     name = fallback = None
-    stored_jid = mapped_jid = None
 
     if table_message:
         if content["sender_jid_row_id"] > 0:
             _jid = content["group_sender_jid"]
-            stored_jid, mapped_jid = content["group_sender_raw_jid"], _jid
             if _jid in data:
                 name = data.get_chat(_jid).name
             if "@" in _jid:
@@ -550,7 +557,6 @@ def _process_metadata_message(message, content, data, table_message):
             name = "You"
     else:
         _jid = content["remote_resource"]
-        stored_jid = _jid
         if _jid is not None:
             if _jid in data:
                 name = data.get_chat(_jid).name
@@ -565,7 +571,8 @@ def _process_metadata_message(message, content, data, table_message):
         message.safe = True
 
     if content["jid_type"] == JidType.GROUP and message.data is not None:
-        _set_group_action(message, content, data, stored_jid, mapped_jid)
+        _set_group_action(message, content, name or fallback,
+                          _row_sender_identity(content, data, table_message).jid)
 
     if message.data is None:
         if content["video_call"] is not None:  # Missed call
@@ -579,15 +586,29 @@ def _process_metadata_message(message, content, data, table_message):
             message.data = None
 
 
-def _set_group_action(message, content, data, stored_jid, mapped_jid):
-    """Set group_action, the text without HTML, and group_action_jid, the member the text names."""
+# Action types whose text quotes the row's data: a group name or description.
+GROUP_ACTION_TYPES_QUOTING_DATA = frozenset({1, 11, 27})
+
+
+def _set_group_action(message, content, name, sender_jid):
+    """Set group_action, the text without HTML, and group_action_jid, the member the text names.
+
+    `sender_jid` is the resolved id of the row's sender. An action whose
+    text would quote a name or description the row does not hold is left None.
+    """
+    action_type = content["action_type"]
     me_joined = content["is_me_joined"] == 1
-    if not me_joined and content["action_type"] not in GROUP_ACTION_TYPES:
+    if not me_joined and action_type not in GROUP_ACTION_TYPES:
         return
-    message.group_action = message.data.replace("<br>", "\n")
-    if me_joined or content["action_type"] in GROUP_ACTION_TYPES_NAMING_SENDER:
-        resolver = data.get_system("identity_resolver") or IdentityResolver()
-        message.group_action_jid = resolver.resolve(stored_jid, mapped_jid=mapped_jid).jid
+    if not me_joined and action_type in GROUP_ACTION_TYPES_QUOTING_DATA and content["data"] is None:
+        return
+    if not me_joined and action_type == 27:
+        # determine_metadata writes the description as HTML; this is the stored text.
+        message.group_action = f"{name} changed the group description to:\n{content['data']}"
+    else:
+        message.group_action = message.data
+    if me_joined or action_type in GROUP_ACTION_TYPES_NAMING_SENDER:
+        message.group_action_jid = sender_jid
 
 
 def _process_regular_message(message, content, table_message):

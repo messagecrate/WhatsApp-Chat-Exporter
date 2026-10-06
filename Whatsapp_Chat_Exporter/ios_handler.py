@@ -441,8 +441,9 @@ def _member_display_name(identity, data):
     digits of an @lid id appear only when the backup has no mapping for it.
     """
     for jid in (identity.jid, identity.lid):
-        if jid and jid in data and data.get_chat(jid).name:
-            return data.get_chat(jid).name
+        name = data.get_chat(jid).name if jid and jid in data else None
+        if name:
+            return name
     return identity.jid.split('@')[0] if identity.jid else None
 
 
@@ -488,10 +489,6 @@ def _parse_group_action(content, data, identity_resolver):
             return f"Someone changed the group name to {subject}.", None
         identity = identity_resolver.resolve(author)
         return f"{_member_display_name(identity, data)} changed the group name to {subject}.", identity.jid
-
-    if ztext == "admin_add":
-        # Upstream's reading of this text; no row on the measured backup holds it.
-        return "The administrator has restricted participant additions to admins only.", None
 
     if event_type == GROUP_EVENT_RENAMED:
         return f"{actor} changed the group name to {ztext}.", actor_jid
