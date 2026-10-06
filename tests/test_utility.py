@@ -130,6 +130,10 @@ class TestDetermineDay:
         timestamp2 = 1704110400  # January 1, 2024 12:00:00 GMT
         assert determine_day(timestamp1, timestamp2) == datetime.fromtimestamp(timestamp2).date()
 
+    def test_local_midnight_between_two_close_timestamps(self):
+        midnight = datetime(2023, 3, 16).timestamp()  # local midnight
+        assert determine_day(midnight - 1800, midnight + 1800) == datetime(2023, 3, 16).date()
+
 
 class TestGetFileName:
     def test_valid_contact_phone_number_no_chat_name(self):
