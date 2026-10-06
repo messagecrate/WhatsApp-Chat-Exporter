@@ -239,13 +239,16 @@ class TestAndroidReactions:
         assert message.reaction_details == [entry(HEART, from_me=True)]
 
     def test_a_one_to_one_reaction_without_a_sender_row_is_by_the_other_person(self):
-        # Android leaves sender_jid_row_id at 0 in a one-to-one chat, as on message rows.
         message = android_reactions([(0, 0, THUMBS_UP)], chat_jid=PHONE, chat_jid_row=2)
         assert message.reaction_details == [entry(THUMBS_UP, jid=PHONE)]
 
-    def test_a_one_to_one_reaction_without_a_sender_row_in_a_lid_chat(self):
+    def test_a_lid_chat_reaction_without_a_sender_row_carries_the_phone_id_and_the_lid(self):
         message = android_reactions([(0, 0, THUMBS_UP)], jid_map=[(3, 2)], chat_jid=PHONE, chat_jid_row=3)
         assert message.reaction_details == [entry(THUMBS_UP, jid=PHONE, lid=LID)]
+
+    def test_an_unmapped_lid_chat_reaction_without_a_sender_row_keeps_the_lid_as_jid(self):
+        message = android_reactions([(0, 0, THUMBS_UP)], jid_map=[(3, 2)], chat_jid=UNMAPPED_LID, chat_jid_row=5)
+        assert message.reaction_details == [entry(THUMBS_UP, jid=UNMAPPED_LID, lid=UNMAPPED_LID)]
 
     def test_a_one_to_one_reaction_with_a_sender_row_keeps_that_sender(self):
         message = android_reactions([(4, 0, THUMBS_UP)], chat_jid=PHONE, chat_jid_row=2)

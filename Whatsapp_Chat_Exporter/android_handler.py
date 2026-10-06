@@ -772,8 +772,8 @@ def _add_reaction_detail(data, row, resolver):
     elif row["sender_jid_raw"]:
         identity = resolver.resolve(row["sender_jid_raw"], mapped_jid=row["sender_jid_mapped"])
     elif is_one_to_one_chat(row["chat_jid_raw"]):
-        # Android leaves sender_jid_row_id at 0 in a one-to-one chat, as it does on
-        # message rows, and the only other person there is the other person of the chat.
+        # Android leaves sender_jid_row_id at 0 in a one-to-one chat, as on message
+        # rows. Besides the owner, the only person in the chat is the one its JID names.
         identity = resolver.resolve(row["chat_jid_raw"], mapped_jid=row["chat_jid_mapped"])
     else:
         identity = NO_IDENTITY
